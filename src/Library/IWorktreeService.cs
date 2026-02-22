@@ -26,17 +26,6 @@ public interface IWorktreeService
     );
 
     /// <summary>
-    /// Lists all worktrees for a repository.
-    /// </summary>
-    /// <param name="repoPath">The path to the repository.</param>
-    /// <param name="cancellationToken">A cancellation token.</param>
-    /// <returns>A list of worktrees.</returns>
-    Task<IReadOnlyList<Worktree>> ListWorktreesAsync(
-        string repoPath,
-        CancellationToken cancellationToken = default
-    );
-
-    /// <summary>
     /// Deletes a worktree.
     /// </summary>
     /// <param name="repoPath">The path to the repository.</param>

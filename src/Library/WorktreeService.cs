@@ -38,15 +38,6 @@ public sealed class WorktreeService(IGitService gitService, WorktreeOptions opti
     }
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<Worktree>> ListWorktreesAsync(
-        string repoPath,
-        CancellationToken cancellationToken = default
-    )
-    {
-        return gitService.ListWorktreesAsync(repoPath, cancellationToken);
-    }
-
-    /// <inheritdoc />
     public async Task DeleteWorktreeAsync(
         string repoPath,
         string branchName,
