@@ -117,4 +117,36 @@ public interface IGitService
         string repoPath,
         CancellationToken cancellationToken = default
     );
+
+    /// <summary>
+    /// Creates a new worktree for the specified branch, using the configured base path to determine the worktree location.
+    /// </summary>
+    /// <param name="repoPath">The path to the repository.</param>
+    /// <param name="branchName">The branch name to check out or create.</param>
+    /// <param name="createBranch">If true, creates a new branch with the given name.</param>
+    /// <param name="startPoint">The commit/branch to start the new branch from (only used when createBranch is true).</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The created worktree.</returns>
+    Task<Worktree> CreateWorktreeAsync(
+        string repoPath,
+        string branchName,
+        bool createBranch = false,
+        string? startPoint = null,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>
+    /// Removes a worktree by branch name, using the configured base path to determine the worktree location.
+    /// The branch itself is left intact.
+    /// </summary>
+    /// <param name="repoPath">The path to the repository.</param>
+    /// <param name="branchName">The branch name of the worktree to remove.</param>
+    /// <param name="force">Whether to force removal even if the worktree is dirty.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    Task RemoveWorktreeByBranchAsync(
+        string repoPath,
+        string branchName,
+        bool force = false,
+        CancellationToken cancellationToken = default
+    );
 }

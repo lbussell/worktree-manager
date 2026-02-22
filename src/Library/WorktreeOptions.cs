@@ -4,7 +4,7 @@
 namespace WorktreeManager;
 
 /// <summary>
-/// Configuration options for <see cref="WorktreeService"/>.
+/// Configuration options for <see cref="GitService"/>.
 /// </summary>
 public sealed class WorktreeOptions
 {
