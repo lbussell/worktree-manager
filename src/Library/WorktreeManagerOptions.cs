@@ -6,7 +6,7 @@ namespace WorktreeManager;
 /// <summary>
 /// Configuration options for <see cref="GitService"/>.
 /// </summary>
-public sealed class WorktreeOptions
+public sealed class WorktreeManagerOptions
 {
     /// <summary>
     /// Gets or sets the base path under which worktree directories are created.
