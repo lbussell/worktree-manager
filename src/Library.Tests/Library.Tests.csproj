@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup Label="Dependencies">
+    <PackageReference Include="MSTest" />
+  </ItemGroup>
+
+  <ItemGroup Label="Project References">
+    <ProjectReference Include="../Library/Library.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Label="Global Usings">
+    <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
+  </ItemGroup>
+</Project>
