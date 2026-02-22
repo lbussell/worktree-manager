@@ -1,7 +1,7 @@
 name: Build
 on:
   push:
-    branches: [main]
+    # branches: [main]  # Disabled during early development
     tags: ['*']
   pull_request:
   workflow_call:
