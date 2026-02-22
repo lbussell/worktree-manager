@@ -71,14 +71,16 @@ public interface IGitService
     Task<string> GetRepoNameAsync(string repoPath, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Clones a repository as a bare clone.
+    /// Clones a repository.
     /// </summary>
     /// <param name="url">The remote URL to clone from.</param>
-    /// <param name="targetPath">The path where the bare clone will be created.</param>
+    /// <param name="targetPath">The path where the clone will be created.</param>
+    /// <param name="options">Options controlling clone behavior.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
-    Task CloneBareAsync(
+    Task CloneAsync(
         string url,
         string targetPath,
+        CloneOptions? options = null,
         CancellationToken cancellationToken = default
     );
 

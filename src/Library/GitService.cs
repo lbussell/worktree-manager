@@ -192,15 +192,26 @@ internal sealed class GitService(IGitCli gitCli) : IGitService
     }
 
     /// <inheritdoc />
-    public async Task CloneBareAsync(
+    public async Task CloneAsync(
         string url,
         string targetPath,
+        CloneOptions? options = null,
         CancellationToken cancellationToken = default
     )
     {
+        List<string> args = ["clone"];
+
+        if (options?.Bare is true)
+        {
+            args.Add("--bare");
+        }
+
+        args.Add(url);
+        args.Add(targetPath);
+
         GitResult result = await gitCli.RunAsync(
             Directory.GetCurrentDirectory(),
-            ["clone", "--bare", url, targetPath],
+            args.ToArray(),
             cancellationToken
         );
 
