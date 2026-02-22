@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup Label="Dependencies">
+    <PackageVersion Include="CSharpier.MSBuild" Version="1.2.6" />
+  </ItemGroup>
+</Project>

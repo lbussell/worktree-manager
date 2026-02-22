@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup Label="Build Properties">
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Packaging Settings">
+    <!-- Require documentation for public methods -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup Label="Formatting">
+    <!-- Format code on build! Verify on publish! -->
+    <PackageReference Include="CSharpier.MSBuild" PrivateAssets="all" />
+  </ItemGroup>
+</Project>
