@@ -1,4 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <RootNamespace>WorktreeManager.Tests</RootNamespace>
+  </PropertyGroup>
+
   <ItemGroup Label="Dependencies">
     <PackageReference Include="MSTest" />
   </ItemGroup>

@@ -58,4 +58,8 @@
   <ItemGroup Label="Package dependencies">
     <PackageReference Include="CliWrap" />
   </ItemGroup>
+
+  <ItemGroup Label="Test support">
+    <InternalsVisibleTo Include="Library.Tests" />
+  </ItemGroup>
 </Project>
