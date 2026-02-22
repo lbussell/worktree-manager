@@ -6,7 +6,7 @@ namespace WorktreeManager;
 /// <summary>
 /// Implementation of <see cref="IGitService"/> for worktree-related git operations.
 /// </summary>
-internal sealed class GitService(IGitCli gitCli, WorktreeOptions options) : IGitService
+internal sealed class GitService(IGitCli gitCli) : IGitService
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<Worktree>> ListWorktreesAsync(
@@ -291,51 +291,6 @@ internal sealed class GitService(IGitCli gitCli, WorktreeOptions options) : IGit
                 return (name, url);
             })
             .ToList();
-    }
-
-    /// <inheritdoc />
-    public async Task<Worktree> CreateWorktreeAsync(
-        string repoPath,
-        string branchName,
-        bool createBranch = false,
-        string? startPoint = null,
-        CancellationToken cancellationToken = default
-    )
-    {
-        string repoName = await GetRepoNameAsync(repoPath, cancellationToken);
-        string worktreePath = GetWorktreePath(repoName, branchName);
-
-        await AddWorktreeAsync(
-            repoPath,
-            worktreePath,
-            branchName,
-            createBranch,
-            startPoint,
-            cancellationToken
-        );
-
-        IReadOnlyList<Worktree> worktrees = await ListWorktreesAsync(repoPath, cancellationToken);
-        return worktrees.First(w => w.Path == worktreePath);
-    }
-
-    /// <inheritdoc />
-    public async Task RemoveWorktreeByBranchAsync(
-        string repoPath,
-        string branchName,
-        bool force = false,
-        CancellationToken cancellationToken = default
-    )
-    {
-        string repoName = await GetRepoNameAsync(repoPath, cancellationToken);
-        string worktreePath = GetWorktreePath(repoName, branchName);
-
-        await RemoveWorktreeAsync(repoPath, worktreePath, force, cancellationToken);
-    }
-
-    private string GetWorktreePath(string repoName, string branchName)
-    {
-        string safeBranchName = branchName.Replace('/', '-');
-        return Path.Combine(options.BasePath, "repos", repoName, "worktrees", safeBranchName);
     }
 
     private static string ParseRepoNameFromUrl(string url)
