@@ -54,4 +54,8 @@
   <ItemGroup Label="Package Content">
     <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
+
+  <ItemGroup Label="Package dependencies">
+    <PackageReference Include="CliWrap" />
+  </ItemGroup>
 </Project>

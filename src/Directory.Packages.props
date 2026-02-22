@@ -4,6 +4,7 @@
   </PropertyGroup>
 
   <ItemGroup Label="Dependencies">
+    <PackageVersion Include="CliWrap" Version="3.10.0" />
     <PackageVersion Include="CSharpier.MSBuild" Version="1.2.6" />
   </ItemGroup>
 </Project>
