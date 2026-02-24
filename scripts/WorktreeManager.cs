@@ -93,7 +93,7 @@ public class WorktreeCommands
 
         foreach (string entry in entries)
         {
-            Console.WriteLine(entry);
+            Console.WriteLine($"{RepoId(entry)} {entry}");
 
             string worktreesDir = Path.Combine(Config.SrcRootPath, $"{entry}.worktrees");
             if (!Directory.Exists(worktreesDir))
@@ -101,19 +101,20 @@ public class WorktreeCommands
 
             foreach (string dir in Directory.GetDirectories(worktreesDir))
             {
-                Console.WriteLine($"  {Path.GetFileName(dir)}");
+                string wt = Path.GetFileName(dir);
+                Console.WriteLine($"    {WorktreeId(entry, wt)} {wt}");
             }
         }
     }
 
     /// <summary>Create a new worktree for a managed repository.</summary>
-    /// <param name="repodir">Repository directory relative to the source root.</param>
+    /// <param name="reporef">Repo name or repo ID.</param>
     /// <param name="worktreename">Name for the new worktree.</param>
     /// <param name="branch">-b, Create a new branch matching the worktree name.</param>
     /// <param name="from">-f, Base ref for the new branch (requires --branch).</param>
     [Command("create|new|n")]
     public async Task Create(
-        [Argument] string repodir,
+        [Argument] string reporef,
         [Argument] string worktreename,
         bool branch = false,
         string? from = null)
@@ -126,9 +127,10 @@ public class WorktreeCommands
         }
 
         string[] entries = ReadWorktreesFile();
+        string repodir = ResolveRepoRef(reporef, entries) ?? reporef;
         if (!entries.Contains(repodir, StringComparer.Ordinal))
         {
-            Console.Error.WriteLine($"Error: Repository not managed: {repodir}. Use 'add' first.");
+            Console.Error.WriteLine($"Error: Repository not managed: {reporef}. Use 'add' first.");
             Environment.ExitCode = 1;
             return;
         }
@@ -166,17 +168,37 @@ public class WorktreeCommands
     }
 
     /// <summary>Remove a worktree, or untrack a repository.</summary>
-    /// <param name="repodir">Repository directory relative to the source root.</param>
-    /// <param name="worktreename">Worktree to remove. If omitted, removes the repo from tracking.</param>
+    /// <param name="reporef">Repo name, repo ID, or worktree ID.</param>
+    /// <param name="worktreename">Worktree to remove. If omitted, ref is resolved automatically.</param>
     [Command("remove|rm")]
-    public async Task Remove([Argument] string repodir, [Argument] string? worktreename = null)
+    public async Task Remove([Argument] string reporef, [Argument] string? worktreename = null)
     {
         string[] entries = ReadWorktreesFile();
-        if (!entries.Contains(repodir, StringComparer.Ordinal))
+
+        string repodir;
+
+        if (worktreename is not null)
         {
-            Console.Error.WriteLine($"Error: Repository not managed: {repodir}.");
-            Environment.ExitCode = 1;
-            return;
+            // Two args: first is repo ref, second is worktree name
+            repodir = ResolveRepoRef(reporef, entries) ?? reporef;
+            if (!entries.Contains(repodir, StringComparer.Ordinal))
+            {
+                Console.Error.WriteLine($"Error: Repository not managed: {reporef}.");
+                Environment.ExitCode = 1;
+                return;
+            }
+        }
+        else
+        {
+            // Single arg: resolve as worktree ID, repo ID, or repo name
+            var resolved = ResolveRef(reporef, entries);
+            if (resolved is null)
+            {
+                Console.Error.WriteLine($"Error: Could not resolve ref: {reporef}.");
+                Environment.ExitCode = 1;
+                return;
+            }
+            (repodir, worktreename) = resolved.Value;
         }
 
         if (worktreename is null)
@@ -223,5 +245,66 @@ public class WorktreeCommands
         return File.ReadAllLines(Config.WorktreesFilePath)
             .Where(line => !string.IsNullOrWhiteSpace(line))
             .ToArray();
+    }
+
+    // FNV-1a 32-bit hash → 3 hex chars (12 bits)
+    static string ShortId(string input)
+    {
+        uint hash = 2166136261;
+        foreach (char c in input)
+        {
+            hash ^= c;
+            hash *= 16777619;
+        }
+        return (hash & 0xFFF).ToString("x3");
+    }
+
+    static string RepoId(string repodir) => ShortId($"repo:{repodir}");
+    static string WorktreeId(string repodir, string worktree) => ShortId($"wt:{repodir}/{worktree}");
+
+    /// <summary>
+    /// Resolves a ref (short ID or exact name) to a (repo, worktree?) pair.
+    /// Checks worktree IDs first, then repo IDs, then exact repo names.
+    /// </summary>
+    static (string Repo, string? Worktree)? ResolveRef(string input, string[] entries)
+    {
+        // Check worktree IDs
+        foreach (string repo in entries)
+        {
+            string wtDir = Path.Combine(Config.SrcRootPath, $"{repo}.worktrees");
+            if (!Directory.Exists(wtDir)) continue;
+            foreach (string dir in Directory.GetDirectories(wtDir))
+            {
+                string wt = Path.GetFileName(dir);
+                if (WorktreeId(repo, wt) == input)
+                    return (repo, wt);
+            }
+        }
+
+        // Check repo IDs
+        foreach (string repo in entries)
+        {
+            if (RepoId(repo) == input)
+                return (repo, null);
+        }
+
+        // Check exact repo names
+        if (entries.Contains(input, StringComparer.Ordinal))
+            return (input, null);
+
+        return null;
+    }
+
+    /// <summary>Resolves a ref to a repo name only (ID or exact name).</summary>
+    static string? ResolveRepoRef(string input, string[] entries)
+    {
+        foreach (string repo in entries)
+        {
+            if (RepoId(repo) == input)
+                return repo;
+        }
+        if (entries.Contains(input, StringComparer.Ordinal))
+            return input;
+        return null;
     }
 }
