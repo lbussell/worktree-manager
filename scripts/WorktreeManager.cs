@@ -12,11 +12,13 @@
 
 #:package ConsoleAppFramework@*
 #:package CliWrap@*
+#:package Spectre.Console@*
 
 using System.Text;
 using ConsoleAppFramework;
 using CliWrap;
 using CliWrap.Buffered;
+using Spectre.Console;
 
 var app = ConsoleApp.Create();
 app.Add<WorktreeCommands>();
@@ -93,7 +95,7 @@ public class WorktreeCommands
 
         foreach (string entry in entries)
         {
-            Console.WriteLine($"{RepoId(entry)} {entry}");
+            AnsiConsole.MarkupLineInterpolated($"[dim]{RepoId(entry)}[/] {entry}");
 
             string worktreesDir = Path.Combine(Config.SrcRootPath, $"{entry}.worktrees");
             if (!Directory.Exists(worktreesDir))
@@ -102,7 +104,7 @@ public class WorktreeCommands
             foreach (string dir in Directory.GetDirectories(worktreesDir))
             {
                 string wt = Path.GetFileName(dir);
-                Console.WriteLine($"    {WorktreeId(entry, wt)} {wt}");
+                AnsiConsole.MarkupLineInterpolated($"    [dim]{WorktreeId(entry, wt)}[/] {wt}");
             }
         }
     }
