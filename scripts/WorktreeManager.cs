@@ -4,10 +4,22 @@
 // Manages git worktrees across repositories in a source directory.
 //
 // Usage:
-//   dotnet scripts/WorktreeManager.cs add <repodir>
-//   dotnet scripts/WorktreeManager.cs list
-//   dotnet scripts/WorktreeManager.cs create <repodir> <worktreename> [--branch] [--from <ref>]
+//   wt add <repodir>              Register a repo for worktree management
+//   wt list                       List managed repos and their worktrees
+//   wt create <repo> <name>       Create a new worktree (--branch/-b, --from/-f)
+//   wt remove <ref>               Remove a worktree or untrack a repo
+//   wt dir <ref>                  Print the path to a repo or worktree
 //
+// Shell functions (defined in .zshrc):
+//   wtcd <id>                     pushd to the repo or worktree directory
+//   wtcp <id>                     pushd and start copilot --yolo
+//   wtcp <id> "<prompt>"          pushd and run copilot --yolo -i "<prompt>"
+//
+//   alias wt="/path/to/WorktreeManager"
+//   wtcd() { pushd "$(wt d "$1")" }
+//   wtcp() { pushd "$(wt d "$1")" && if [[ -n "$2" ]]; then copilot --yolo -i "$2"; else copilot --yolo; fi }
+//
+// All commands accept short IDs (shown in 'wt list') in place of full names.
 // Configuration: change SrcRoot in the Config class below.
 
 #:package ConsoleAppFramework@*
