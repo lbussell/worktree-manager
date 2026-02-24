@@ -39,6 +39,8 @@ static class Config
 /// <summary>Manage git worktrees across repositories.</summary>
 public class WorktreeCommands
 {
+    static readonly CliWrapper Git = new("git");
+
     /// <summary>Register a repository for worktree management.</summary>
     /// <param name="repodir">Repository directory relative to the source root.</param>
     [Command("add|a")]
@@ -48,20 +50,19 @@ public class WorktreeCommands
 
         if (!Directory.Exists(repoPath))
         {
-            Console.Error.WriteLine($"Error: Directory does not exist: {repoPath}");
+            AnsiConsole.MarkupLineInterpolated($"[red]Error:[/] Directory does not exist: [dim]{repoPath}[/]");
             Environment.ExitCode = 1;
             return;
         }
 
-        BufferedCommandResult result = await Cli.Wrap("git")
-            .WithArguments("rev-parse --git-dir")
-            .WithWorkingDirectory(repoPath)
-            .WithValidation(CommandResultValidation.None)
-            .ExecuteBufferedAsync(Encoding.UTF8, Encoding.UTF8);
+        BufferedCommandResult result = await Git.RunAsync(
+            ["rev-parse", "--git-dir"],
+            workingDirectory: repoPath,
+            silent: true);
 
         if (result.ExitCode != 0)
         {
-            Console.Error.WriteLine($"Error: Not a git repository: {repoPath}");
+            AnsiConsole.MarkupLineInterpolated($"[red]Error:[/] Not a git repository: [dim]{repoPath}[/]");
             Environment.ExitCode = 1;
             return;
         }
@@ -69,7 +70,7 @@ public class WorktreeCommands
         string[] entries = ReadWorktreesFile();
         if (entries.Contains(repodir, StringComparer.Ordinal))
         {
-            Console.WriteLine($"Already registered: {repodir}");
+            AnsiConsole.MarkupLineInterpolated($"Already registered: [purple]{RepoId(repodir)}[/] {repodir}");
             return;
         }
 
@@ -78,7 +79,7 @@ public class WorktreeCommands
         string worktreesDir = Path.Combine(Config.SrcRootPath, $"{repodir}.worktrees");
         Directory.CreateDirectory(worktreesDir);
 
-        Console.WriteLine($"Added: {repodir}");
+        AnsiConsole.MarkupLineInterpolated($"Added [purple]{RepoId(repodir)}[/] {repodir}");
     }
 
     /// <summary>List all managed repositories and their worktrees.</summary>
@@ -89,13 +90,13 @@ public class WorktreeCommands
 
         if (entries.Length == 0)
         {
-            Console.WriteLine("No repositories registered. Use 'add' to register one.");
+            AnsiConsole.MarkupLineInterpolated($"[yellow]No repositories registered.[/] Use 'add' to register one.");
             return;
         }
 
         foreach (string entry in entries)
         {
-            AnsiConsole.MarkupLineInterpolated($"[dim]{RepoId(entry)}[/] {entry}");
+            AnsiConsole.MarkupLineInterpolated($"[purple]{RepoId(entry)}[/] {entry}");
 
             string worktreesDir = Path.Combine(Config.SrcRootPath, $"{entry}.worktrees");
             if (!Directory.Exists(worktreesDir))
@@ -104,7 +105,7 @@ public class WorktreeCommands
             foreach (string dir in Directory.GetDirectories(worktreesDir))
             {
                 string wt = Path.GetFileName(dir);
-                AnsiConsole.MarkupLineInterpolated($"    [dim]{WorktreeId(entry, wt)}[/] {wt}");
+                AnsiConsole.MarkupLineInterpolated($"    [blue]{WorktreeId(entry, wt)}[/] {wt}");
             }
         }
     }
@@ -132,7 +133,7 @@ public class WorktreeCommands
         string repodir = ResolveRepoRef(reporef, entries) ?? reporef;
         if (!entries.Contains(repodir, StringComparer.Ordinal))
         {
-            Console.Error.WriteLine($"Error: Repository not managed: {reporef}. Use 'add' first.");
+            AnsiConsole.MarkupLineInterpolated($"[red]Error:[/] Repository not managed: [dim]{reporef}[/]. Use 'add' first.");
             Environment.ExitCode = 1;
             return;
         }
@@ -153,12 +154,9 @@ public class WorktreeCommands
             gitArgs.AddRange(["--detach", worktreePath]);
         }
 
-        BufferedCommandResult result = await Cli.Wrap("git")
-            .WithArguments(gitArgs)
-            .WithWorkingDirectory(repoPath)
-            .WithValidation(CommandResultValidation.None)
-            .WithStandardErrorPipe(PipeTarget.ToStream(Console.OpenStandardError()))
-            .ExecuteBufferedAsync(Encoding.UTF8, Encoding.UTF8);
+        BufferedCommandResult result = await Git.RunAsync(
+            [.. gitArgs],
+            workingDirectory: repoPath);
 
         if (result.ExitCode != 0)
         {
@@ -166,7 +164,7 @@ public class WorktreeCommands
             return;
         }
 
-        AnsiConsole.MarkupLineInterpolated($"[green]Created worktree:[/] {worktreePath}");
+        AnsiConsole.MarkupLineInterpolated($"Created worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {worktreePath}");
     }
 
     /// <summary>Print the path to a repo or worktree.</summary>
@@ -230,7 +228,7 @@ public class WorktreeCommands
             // Remove repo from tracking
             string[] updated = entries.Where(e => e != repodir).ToArray();
             File.WriteAllLines(Config.WorktreesFilePath, updated);
-            Console.WriteLine($"Removed from tracking: {repodir}");
+            AnsiConsole.MarkupLineInterpolated($"Removed from tracking: [purple]{RepoId(repodir)}[/] {repodir}");
             return;
         }
 
@@ -245,12 +243,9 @@ public class WorktreeCommands
             return;
         }
 
-        BufferedCommandResult result = await Cli.Wrap("git")
-            .WithArguments(["worktree", "remove", worktreePath])
-            .WithWorkingDirectory(repoPath)
-            .WithValidation(CommandResultValidation.None)
-            .WithStandardErrorPipe(PipeTarget.ToStream(Console.OpenStandardError()))
-            .ExecuteBufferedAsync(Encoding.UTF8, Encoding.UTF8);
+        BufferedCommandResult result = await Git.RunAsync(
+            ["worktree", "remove", worktreePath],
+            workingDirectory: repoPath);
 
         if (result.ExitCode != 0)
         {
@@ -258,7 +253,7 @@ public class WorktreeCommands
             return;
         }
 
-        Console.WriteLine($"Removed worktree: {worktreePath}");
+        AnsiConsole.MarkupLineInterpolated($"Removed worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {worktreePath}");
     }
 
     static string[] ReadWorktreesFile()
@@ -330,5 +325,36 @@ public class WorktreeCommands
         if (entries.Contains(input, StringComparer.Ordinal))
             return input;
         return null;
+    }
+}
+
+internal class CliWrapper(string command)
+{
+    readonly PipeTarget _stdOutPipe =
+        PipeTarget.ToDelegate(line => AnsiConsole.MarkupLineInterpolated($"[dim][[stdout]] {line}[/]"));
+    readonly PipeTarget _stdErrPipe =
+        PipeTarget.ToDelegate(line => AnsiConsole.MarkupLineInterpolated($"[dim][[stderr]] {line}[/]"));
+
+    public async Task<BufferedCommandResult> RunAsync(
+        string[] arguments,
+        string? workingDirectory = null,
+        bool silent = false,
+        CancellationToken cancellationToken = default)
+    {
+        Command cmd = Cli.Wrap(command)
+            .WithArguments(arguments)
+            .WithValidation(CommandResultValidation.None);
+
+        if (workingDirectory is not null)
+            cmd = cmd.WithWorkingDirectory(workingDirectory);
+
+        if (!silent)
+        {
+            cmd = cmd.WithStandardOutputPipe(_stdOutPipe).WithStandardErrorPipe(_stdErrPipe);
+            string commandString = Markup.Escape($"{command} {string.Join(' ', arguments)}");
+            AnsiConsole.MarkupLineInterpolated($"[blue][[exec]] {commandString}[/]");
+        }
+
+        return await cmd.ExecuteBufferedAsync(Encoding.UTF8, Encoding.UTF8, cancellationToken);
     }
 }
