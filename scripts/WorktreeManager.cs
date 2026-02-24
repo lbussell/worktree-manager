@@ -166,7 +166,29 @@ public class WorktreeCommands
             return;
         }
 
-        Console.WriteLine($"Created worktree: {worktreePath}");
+        AnsiConsole.MarkupLineInterpolated($"[green]Created worktree:[/] {worktreePath}");
+    }
+
+    /// <summary>Print the path to a repo or worktree.</summary>
+    /// <param name="id">Repo name, repo ID, or worktree ID.</param>
+    [Command("dir|d")]
+    public void Dir([Argument] string id)
+    {
+        string[] entries = ReadWorktreesFile();
+        (string Repo, string? Worktree)? resolved = ResolveRef(id, entries);
+        if (resolved is null)
+        {
+            Console.Error.WriteLine($"Error: Could not resolve ref: {id}.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        (string? repo, string? worktree) = resolved.Value;
+        string path = worktree is not null
+            ? Path.Combine(Config.SrcRootPath, $"{repo}.worktrees", worktree)
+            : Path.Combine(Config.SrcRootPath, repo);
+
+        Console.WriteLine(path);
     }
 
     /// <summary>Remove a worktree, or untrack a repository.</summary>
