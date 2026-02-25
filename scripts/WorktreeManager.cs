@@ -98,7 +98,7 @@ public class WorktreeCommands
 
     /// <summary>List all managed repositories and their worktrees.</summary>
     [Command("list|l")]
-    public void List()
+    public async Task List()
     {
         string[] entries = ReadWorktreesFile();
 
@@ -108,9 +108,29 @@ public class WorktreeCommands
             return;
         }
 
+        // Collect all directories and kick off status queries concurrently
+        var items = new List<(string Entry, string? Worktree, string Dir)>();
         foreach (string entry in entries)
         {
-            AnsiConsole.MarkupLineInterpolated($"[purple]{RepoId(entry)}[/] {entry}");
+            items.Add((entry, null, Path.Combine(Config.SrcRootPath, entry)));
+
+            string worktreesDir = Path.Combine(Config.SrcRootPath, $"{entry}.worktrees");
+            if (!Directory.Exists(worktreesDir))
+                continue;
+
+            foreach (string dir in Directory.GetDirectories(worktreesDir))
+                items.Add((entry, Path.GetFileName(dir), dir));
+        }
+
+        var statusTasks = items.ToDictionary(i => i, i => GetGitStatusAsync(i.Dir));
+        await Task.WhenAll(statusTasks.Values);
+
+        // Display
+        foreach (string entry in entries)
+        {
+            var repoKey = items.First(i => i.Entry == entry && i.Worktree is null);
+            string statusMarkup = FormatGitStatus(statusTasks[repoKey].Result);
+            AnsiConsole.MarkupLine($"[purple]{RepoId(entry)}[/] {Markup.Escape(entry)}{statusMarkup}");
 
             string worktreesDir = Path.Combine(Config.SrcRootPath, $"{entry}.worktrees");
             if (!Directory.Exists(worktreesDir))
@@ -119,7 +139,9 @@ public class WorktreeCommands
             foreach (string dir in Directory.GetDirectories(worktreesDir))
             {
                 string wt = Path.GetFileName(dir);
-                AnsiConsole.MarkupLineInterpolated($"    [blue]{WorktreeId(entry, wt)}[/] {wt}");
+                var wtKey = items.First(i => i.Entry == entry && i.Worktree == wt);
+                string wtStatus = FormatGitStatus(statusTasks[wtKey].Result);
+                AnsiConsole.MarkupLine($"    [blue]{WorktreeId(entry, wt)}[/] {Markup.Escape(wt)}{wtStatus}");
             }
         }
     }
@@ -319,6 +341,139 @@ public class WorktreeCommands
         AnsiConsole.MarkupLineInterpolated($"Removed worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {worktreePath}");
     }
 
+    static async Task<GitStatus?> GetGitStatusAsync(string workingDir)
+    {
+        // Get branch, ahead/behind, and untracked count
+        BufferedCommandResult statusResult = await Git.RunAsync(
+            ["status", "-b", "--porcelain"],
+            workingDirectory: workingDir,
+            silent: true);
+
+        if (statusResult.ExitCode != 0)
+            return null;
+
+        string[] lines = statusResult.StandardOutput
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        if (lines.Length == 0)
+            return null;
+
+        // Parse branch line: ## branch...upstream [ahead N, behind M]
+        string branchLine = lines[0];
+        string branch = "HEAD";
+        int ahead = 0, behind = 0;
+        bool hasUpstream = false;
+
+        if (branchLine.StartsWith("## ", StringComparison.Ordinal))
+        {
+            string rest = branchLine[3..];
+            int bracketIdx = rest.IndexOf('[');
+            string branchPart = bracketIdx >= 0 ? rest[..bracketIdx].Trim() : rest.Trim();
+
+            int dotIdx = branchPart.IndexOf("...", StringComparison.Ordinal);
+            if (dotIdx >= 0)
+            {
+                branch = branchPart[..dotIdx];
+                hasUpstream = true;
+            }
+            else
+            {
+                branch = branchPart;
+            }
+
+            if (bracketIdx >= 0)
+            {
+                int closeBracket = rest.IndexOf(']', bracketIdx);
+                if (closeBracket >= 0)
+                {
+                    string tracking = rest[(bracketIdx + 1)..closeBracket];
+                    foreach (string part in tracking.Split(',', StringSplitOptions.TrimEntries))
+                    {
+                        if (part.StartsWith("ahead ", StringComparison.Ordinal)
+                            && int.TryParse(part[6..], out int a))
+                            ahead = a;
+                        else if (part.StartsWith("behind ", StringComparison.Ordinal)
+                            && int.TryParse(part[7..], out int b))
+                            behind = b;
+                    }
+                }
+            }
+        }
+
+        // Count untracked files (lines starting with ??)
+        int untrackedFiles = lines.Skip(1).Count(l => l.StartsWith("??", StringComparison.Ordinal));
+
+        // Get total line additions/deletions (staged + unstaged vs HEAD)
+        int additions = 0, deletions = 0;
+        BufferedCommandResult diffResult = await Git.RunAsync(
+            ["diff", "HEAD", "--numstat"],
+            workingDirectory: workingDir,
+            silent: true);
+
+        if (diffResult.ExitCode == 0)
+        {
+            foreach (string diffLine in diffResult.StandardOutput
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                string[] parts = diffLine.Split('\t');
+                if (parts.Length >= 2
+                    && int.TryParse(parts[0], out int add)
+                    && int.TryParse(parts[1], out int del))
+                {
+                    additions += add;
+                    deletions += del;
+                }
+            }
+        }
+
+        return new GitStatus(branch, ahead, behind, hasUpstream, additions, deletions, untrackedFiles);
+    }
+
+    static string FormatGitStatus(GitStatus? status)
+    {
+        if (status is null)
+            return "";
+
+        var sb = new StringBuilder();
+
+        // Branch name (dim)
+        sb.Append($" [dim]{Markup.Escape(status.Branch)}[/]");
+
+        // Ahead/behind
+        if (!status.HasUpstream)
+        {
+            sb.Append(" [dim]~[/]");
+        }
+        else if (status.Ahead == 0 && status.Behind == 0)
+        {
+            sb.Append(" [green]✓[/]");
+        }
+        else
+        {
+            sb.Append(' ');
+            if (status.Ahead > 0) sb.Append($"[yellow]↑{status.Ahead}[/]");
+            if (status.Behind > 0) sb.Append($"[yellow]↓{status.Behind}[/]");
+        }
+
+        // Changes: +N/-M or -/-
+        if (status.Additions == 0 && status.Deletions == 0)
+        {
+            sb.Append(" [dim]-[/]/[dim]-[/]");
+        }
+        else
+        {
+            sb.Append($" [green]+{status.Additions}[/]/[red]-{status.Deletions}[/]");
+        }
+
+        // Untracked files
+        if (status.UntrackedFiles > 0)
+        {
+            sb.Append($"/{status.UntrackedFiles}[green]u[/]");
+        }
+
+        return sb.ToString();
+    }
+
     static string[] ReadWorktreesFile()
     {
         if (!File.Exists(Config.WorktreesFilePath))
@@ -390,6 +545,8 @@ public class WorktreeCommands
         return null;
     }
 }
+
+record GitStatus(string Branch, int Ahead, int Behind, bool HasUpstream, int Additions, int Deletions, int UntrackedFiles);
 
 internal class CliWrapper(string command)
 {
