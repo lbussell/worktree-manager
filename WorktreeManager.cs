@@ -11,7 +11,7 @@
 //   wt remove <ref>               Remove a worktree or untrack a repo
 //   wt dir <ref>                  Print the path to a repo or worktree
 //
-// Shell functions (defined in .zshrc):
+// Useful shell functions (defined in .zshrc):
 //   wtcd <id>                     pushd to the repo or worktree directory
 //   wtcp <id>                     pushd and start copilot --yolo
 //   wtcp <id> "<prompt>"          pushd and run copilot --yolo -i "<prompt>"
@@ -21,6 +21,7 @@
 //   wtcp() { pushd "$(wt d "$1")" && if [[ -n "$2" ]]; then copilot --yolo -i "$2"; else copilot --yolo; fi }
 //
 // All commands accept short IDs (shown in 'wt list') in place of full names.
+// Short IDs are an FNV-1a 32-bit hash of the repo/worktree name, so they are unique and stable.
 // Configuration: change SrcRoot in the Config class below.
 
 #:package ConsoleAppFramework@*
