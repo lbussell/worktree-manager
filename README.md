@@ -1,38 +1,56 @@
-# .NET Project Template
+# Worktree Manager
 
-## How to add new projects
+A CLI tool for managing git worktrees across multiple repositories in a source directory. Built as a [.NET file-based app](https://learn.microsoft.com/dotnet/core/whats-new/dotnet-10#file-based-apps) using [ConsoleAppFramework](https://github.com/Cysharp/ConsoleAppFramework), [CliWrap](https://github.com/Tyrrrz/CliWrap), and [Spectre.Console](https://spectreconsole.net/).
 
-Projects go under the `src/` folder.
-Projects should be named descriptively, but should not be too verbose.
+## Setup
 
-Example project layout:
+1. Build the tool:
 
-```text
-- MyAwesomeProject.slnx
-- src/
-    - Console/
-        Console.csproj
-    - Library/
-        Library.csproj
-    - Library.Tests/
-        Library.Tests.csproj
-```
+   ```bash
+   dotnet publish WorktreeManager.cs -o artifacts/WorktreeManager
+   ```
 
-Test projects go in the `src/` folder too, and should be named the same as the project they are testing but with the `.Tests` suffix.
+2. Add a shell alias and helper functions to your `.zshrc`:
 
-Projects should have limited namespace nesting.
-Only add nesting when differentiation is required.
-If all of the projects in the repo will have the same prefix (e.g. `MyProject.Library`, `MyProject.Tests`, `MyProject.Web`), then the prefix does not provide value and should be removed.
+   ```zsh
+   alias wt="/path/to/artifacts/WorktreeManager/WorktreeManager"
+   wtcd() { pushd "$(wt d "$1")" }
+   wtcp() { pushd "$(wt d "$1")" && if [[ -n "$2" ]]; then copilot --yolo -i "$2"; else copilot --yolo; fi }
+   ```
 
-### Example: Add a new class library
+3. (Optional) Update `SrcRoot` in the `Config` class in `WorktreeManager.cs` to point to your source directory (defaults to `~/src`).
 
-From the repo root, run the following:
+## Commands
 
-```bash
-# Always run with dry-run first to verify correctness
-dotnet new classlib --name MyClasslib --output src/MyClasslib --dry-run
-# Create the project
-dotnet new classlib --name MyClasslib --output src/MyClasslib --dry-run
-# Always add projects to the root of the solution - no solution folders
-dotnet sln *.slnx add src/MyClasslib --in-root
-```
+| Command | Alias | Description |
+|---|---|---|
+| `wt add <repodir>` | `a` | Register a repo for worktree management |
+| `wt list` | `l` | List managed repos and their worktrees |
+| `wt create <repo> <name>` | `new`, `n` | Create a new worktree |
+| `wt create <repo> --pr <num>` | | Create a worktree and check out a PR |
+| `wt remove <ref>` | `rm` | Remove a worktree or untrack a repo |
+| `wt dir <ref>` | `d` | Print the path to a repo or worktree |
+
+### Create options
+
+| Flag | Description |
+|---|---|
+| `--branch`, `-b` | Create a new branch matching the worktree name |
+| `--from`, `-f` | Base ref for the new branch (requires `--branch`) |
+| `--pr`, `-p` | PR number to check out in the new worktree |
+
+## Shell functions
+
+| Function | Description |
+|---|---|
+| `wtcd <id>` | `pushd` to the repo or worktree directory |
+| `wtcp <id>` | `pushd` and start `copilot --yolo` |
+| `wtcp <id> "<prompt>"` | `pushd` and run `copilot --yolo -i "<prompt>"` |
+
+## Short IDs
+
+All commands accept short IDs (shown in `wt list` output) in place of full names. Short IDs are a 3-character hex string derived from an FNV-1a 32-bit hash of the repo/worktree name, so they are stable and unique.
+
+## License
+
+[MIT](LICENSE)
