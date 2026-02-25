@@ -1,9 +1,0 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <PublishAot>true</PublishAot>
-    <RootNamespace>WorktreeManager.Console</RootNamespace>
-    <PackAsTool>true</PackAsTool>
-    <ToolCommandName>worktree-manager</ToolCommandName>
-  </PropertyGroup>
-</Project>

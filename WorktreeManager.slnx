@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="src/Console/Console.csproj" />
-  <Project Path="src/Library/Library.csproj" />
-  <Project Path="src/Library.Tests/Library.Tests.csproj" />
-</Solution>
