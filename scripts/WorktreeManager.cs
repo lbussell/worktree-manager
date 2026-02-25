@@ -7,6 +7,7 @@
 //   wt add <repodir>              Register a repo for worktree management
 //   wt list                       List managed repos and their worktrees
 //   wt create <repo> <name>       Create a new worktree (--branch/-b, --from/-f)
+//   wt create <repo> --pr <num>   Create a worktree and check out a PR
 //   wt remove <ref>               Remove a worktree or untrack a repo
 //   wt dir <ref>                  Print the path to a repo or worktree
 //
@@ -52,6 +53,7 @@ static class Config
 public class WorktreeCommands
 {
     static readonly CliWrapper Git = new("git");
+    static readonly CliWrapper Gh = new("gh");
 
     /// <summary>Register a repository for worktree management.</summary>
     /// <param name="repodir">Repository directory relative to the source root.</param>
@@ -124,15 +126,17 @@ public class WorktreeCommands
 
     /// <summary>Create a new worktree for a managed repository.</summary>
     /// <param name="reporef">Repo name or repo ID.</param>
-    /// <param name="worktreename">Name for the new worktree.</param>
+    /// <param name="worktreename">Name for the new worktree. Auto-generated when using --pr.</param>
     /// <param name="branch">-b, Create a new branch matching the worktree name.</param>
     /// <param name="from">-f, Base ref for the new branch (requires --branch).</param>
+    /// <param name="pr">-p, PR number to check out in the new worktree.</param>
     [Command("create|new|n")]
     public async Task Create(
         [Argument] string reporef,
-        [Argument] string worktreename,
+        [Argument] string? worktreename = null,
         bool branch = false,
-        string? from = null)
+        string? from = null,
+        int? pr = null)
     {
         if (from is not null && !branch)
         {
@@ -140,6 +144,22 @@ public class WorktreeCommands
             Environment.ExitCode = 1;
             return;
         }
+
+        if (pr is not null && (branch || from is not null))
+        {
+            Console.Error.WriteLine("Error: --pr/-p cannot be combined with --branch/-b or --from/-f.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (worktreename is null && pr is null)
+        {
+            Console.Error.WriteLine("Error: worktreename is required unless --pr/-p is specified.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        worktreename ??= $"pr-{pr}";
 
         string[] entries = ReadWorktreesFile();
         string repodir = ResolveRepoRef(reporef, entries) ?? reporef;
@@ -177,6 +197,37 @@ public class WorktreeCommands
         }
 
         AnsiConsole.MarkupLineInterpolated($"Created worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {worktreePath}");
+
+        if (pr is not null)
+        {
+            result = await Gh.RunAsync(
+                ["pr", "checkout", pr.Value.ToString()],
+                workingDirectory: worktreePath);
+
+            if (result.ExitCode != 0)
+            {
+                if (AnsiConsole.Confirm("PR checkout failed (branches may have diverged). Force checkout?", defaultValue: false))
+                {
+                    result = await Gh.RunAsync(
+                        ["pr", "checkout", pr.Value.ToString(), "--force"],
+                        workingDirectory: worktreePath);
+
+                    if (result.ExitCode != 0)
+                    {
+                        Environment.ExitCode = 1;
+                        return;
+                    }
+
+                    AnsiConsole.MarkupLineInterpolated($"Created worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {worktreePath}");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine("Worktree created but PR not checked out.");
+                    Environment.ExitCode = 1;
+                    return;
+                }
+            }
+        }
     }
 
     /// <summary>Print the path to a repo or worktree.</summary>
