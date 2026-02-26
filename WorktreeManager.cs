@@ -22,7 +22,7 @@
 //
 // All commands accept short IDs (shown in 'wt list') in place of full names.
 // Short IDs are an FNV-1a 32-bit hash of the repo/worktree name, so they are unique and stable.
-// Configuration: change SrcRoot in the Config class below.
+// Configuration: change SourceRoot in the Config class below.
 
 #:package ConsoleAppFramework@*
 #:package CliWrap@*
@@ -30,6 +30,7 @@
 
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ConsoleAppFramework;
 using CliWrap;
 using CliWrap.Buffered;
@@ -43,214 +44,220 @@ app.Run(args);
 static class Config
 {
     // ---- Change this to your source directory ----
-    const string SrcRoot = "~/src";
+    const string SourceRoot = "~/src";
 
-    public static readonly string SrcRootPath =
-        SrcRoot.Replace("~", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+    public static readonly string SourceRootPath =
+        SourceRoot.Replace("~", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
     public static readonly string WorktreesFilePath =
-        Path.Combine(SrcRootPath, "worktrees.txt");
+        Path.Combine(SourceRootPath, "worktrees.txt");
 }
 
 /// <summary>Manage git worktrees across repositories.</summary>
 public class WorktreeCommands
 {
     static readonly CliWrapper Git = new("git");
-    static readonly CliWrapper Gh = new("gh");
+    static readonly CliWrapper GitHubCli = new("gh");
 
     /// <summary>Register a repository for worktree management.</summary>
-    /// <param name="repodir">Repository directory relative to the source root.</param>
+    /// <param name="repoDirectory">Repository directory relative to the source root.</param>
     [Command("add|a")]
-    public async Task Add([Argument] string repodir)
+    public async Task Add([Argument] string repoDirectory)
     {
-        string repoPath = Path.Combine(Config.SrcRootPath, repodir);
+        string repositoryPath = Path.Combine(Config.SourceRootPath, repoDirectory);
 
-        if (!Directory.Exists(repoPath))
+        if (!Directory.Exists(repositoryPath))
         {
-            AnsiConsole.Write(new Markup($"[red]Error:[/] Directory does not exist: [dim]{Markup.Escape(repoPath)}[/]\n"));
+            AnsiConsole.Write(new Markup($"[red]Error:[/] Directory does not exist: [dim]{Markup.Escape(repositoryPath)}[/]\n"));
             Environment.ExitCode = 1;
             return;
         }
 
-        BufferedCommandResult result = await Git.RunAsync(
+        BufferedCommandResult gitResult = await Git.RunAsync(
             ["rev-parse", "--git-dir"],
-            workingDirectory: repoPath,
+            workingDirectory: repositoryPath,
             silent: true);
 
-        if (result.ExitCode != 0)
+        if (gitResult.ExitCode != 0)
         {
-            AnsiConsole.Write(new Markup($"[red]Error:[/] Not a git repository: [dim]{Markup.Escape(repoPath)}[/]\n"));
+            AnsiConsole.Write(new Markup($"[red]Error:[/] Not a git repository: [dim]{Markup.Escape(repositoryPath)}[/]\n"));
             Environment.ExitCode = 1;
             return;
         }
 
-        string[] entries = ReadWorktreesFile();
-        if (entries.Contains(repodir, StringComparer.Ordinal))
+        IReadOnlyList<Worktree> managedRepositories = ReadWorktreesFile();
+        if (managedRepositories.Any(repository => repository.RepositoryDirectory == repoDirectory))
         {
-            AnsiConsole.Write(new Markup($"Already registered: [purple]{RepoId(repodir)}[/] {Markup.Escape(repodir)}\n"));
+            var existingWorktree = new Worktree(repoDirectory);
+            AnsiConsole.Write(new Markup($"Already registered: [purple]{existingWorktree.Id}[/] {Markup.Escape(repoDirectory)}\n"));
             return;
         }
 
-        File.AppendAllLines(Config.WorktreesFilePath, [repodir]);
+        File.AppendAllLines(Config.WorktreesFilePath, [repoDirectory]);
 
-        string worktreesDir = Path.Combine(Config.SrcRootPath, $"{repodir}.worktrees");
-        Directory.CreateDirectory(worktreesDir);
+        var worktree = new Worktree(repoDirectory);
+        Directory.CreateDirectory(worktree.WorktreesDirectoryPath);
 
-        AnsiConsole.Write(new Markup($"Added [purple]{RepoId(repodir)}[/] {Markup.Escape(repodir)}\n"));
+        AnsiConsole.Write(new Markup($"Added [purple]{worktree.Id}[/] {Markup.Escape(repoDirectory)}\n"));
     }
 
     /// <summary>List all managed repositories and their worktrees.</summary>
     [Command("list|l")]
     public async Task List()
     {
-        string[] entries = ReadWorktreesFile();
+        IReadOnlyList<Worktree> managedRepositories = ReadWorktreesFile();
 
-        if (entries.Length == 0)
+        if (managedRepositories.Count == 0)
         {
             AnsiConsole.Write(new Markup("[yellow]No repositories registered.[/] Use 'add' to register one.\n"));
             return;
         }
 
         // Collect all directories and kick off status queries concurrently
-        var items = new List<(string Entry, string? Worktree, string Dir)>();
-        foreach (string entry in entries)
-        {
-            items.Add((entry, null, Path.Combine(Config.SrcRootPath, entry)));
+        var directories = managedRepositories.SelectMany(repository =>
+            new[] { new DirectoryEntry(repository.RepositoryDirectory, WorktreeName: null, DirectoryPath: repository.FullPath) }
+                .Concat(!Directory.Exists(repository.WorktreesDirectoryPath) ? [] :
+                    Directory.GetDirectories(repository.WorktreesDirectoryPath)
+                        .Select(directory => new DirectoryEntry(repository.RepositoryDirectory, Path.GetFileName(directory), directory))))
+            .ToList();
 
-            string worktreesDir = Path.Combine(Config.SrcRootPath, $"{entry}.worktrees");
-            if (!Directory.Exists(worktreesDir))
-                continue;
-
-            foreach (string dir in Directory.GetDirectories(worktreesDir))
-                items.Add((entry, Path.GetFileName(dir), dir));
-        }
-
-        var statusTasks = items.ToDictionary(i => i, i => GetGitStatusAsync(i.Dir));
-        var prTasks = entries.ToDictionary(
-            e => e,
-            e => GetOpenPrsAsync(Path.Combine(Config.SrcRootPath, e)));
-        await Task.WhenAll(statusTasks.Values.Cast<Task>().Concat(prTasks.Values));
+        var statusTasks = directories.ToDictionary(
+            directory => directory,
+            directory => GetGitStatusAsync(directory.DirectoryPath));
+        var pullRequestTasks = managedRepositories.ToDictionary(
+            repository => repository.RepositoryDirectory,
+            repository => GetPullRequestsAsync(repository.FullPath));
+        await Task.WhenAll(statusTasks.Values.Cast<Task>().Concat(pullRequestTasks.Values));
 
         // Compose view declaratively
-        var renderables = new List<IRenderable>();
-        foreach (string entry in entries)
+        var renderedRows = new List<IRenderable>();
+        foreach (Worktree repository in managedRepositories)
         {
-            var prs = prTasks[entry].Result;
-            var repoKey = items.First(i => i.Entry == entry && i.Worktree is null);
+            var pullRequests = pullRequestTasks[repository.RepositoryDirectory].Result;
+            var repositoryKey = directories.First(
+                directory => directory.RepositoryDirectory == repository.RepositoryDirectory && directory.WorktreeName is null);
 
-            var worktrees = new List<(string Wt, GitStatus? Status)>();
-            string worktreesDir = Path.Combine(Config.SrcRootPath, $"{entry}.worktrees");
-            if (Directory.Exists(worktreesDir))
+            var worktreeStatuses = new List<WorktreeStatus>();
+
+            if (Directory.Exists(repository.WorktreesDirectoryPath))
             {
-                foreach (string dir in Directory.GetDirectories(worktreesDir))
+                foreach (string worktreeDirectory in Directory.GetDirectories(repository.WorktreesDirectoryPath))
                 {
-                    string wt = Path.GetFileName(dir);
-                    var wtKey = items.First(i => i.Entry == entry && i.Worktree == wt);
-                    worktrees.Add((wt, statusTasks[wtKey].Result));
+                    string worktreeName = Path.GetFileName(worktreeDirectory);
+                    var worktreeKey = directories.First(
+                        directory => directory.RepositoryDirectory == repository.RepositoryDirectory && directory.WorktreeName == worktreeName);
+                    worktreeStatuses.Add(new WorktreeStatus(worktreeName, statusTasks[worktreeKey].Result));
                 }
             }
 
-            renderables.Add(RenderRepoEntry(entry, statusTasks[repoKey].Result, worktrees, prs));
+            renderedRows.Add(ListRenderer.RenderRepositoryEntry(
+                repository, statusTasks[repositoryKey].Result, worktreeStatuses, pullRequests));
         }
 
-        AnsiConsole.Write(new Rows(renderables));
+        AnsiConsole.Write(new Rows(renderedRows));
     }
 
     /// <summary>Create a new worktree for a managed repository.</summary>
-    /// <param name="reporef">Repo name or repo ID.</param>
-    /// <param name="worktreename">Name for the new worktree. Auto-generated when using --pr.</param>
-    /// <param name="branch">-b, Create a new branch matching the worktree name.</param>
-    /// <param name="from">-f, Base ref for the new branch (requires --branch).</param>
-    /// <param name="pr">-p, PR number to check out in the new worktree.</param>
+    /// <param name="repoReference">Repo name or repo ID.</param>
+    /// <param name="worktreeName">Name for the new worktree. Auto-generated when using --pr.</param>
+    /// <param name="createBranch">-b, Create a new branch matching the worktree name.</param>
+    /// <param name="baseRef">-f, Base ref for the new branch (requires --createBranch).</param>
+    /// <param name="pullRequestNumber">-p, PR number to check out in the new worktree.</param>
     [Command("create|new|n")]
     public async Task Create(
-        [Argument] string reporef,
-        [Argument] string? worktreename = null,
-        bool branch = false,
-        string? from = null,
-        int? pr = null)
+        [Argument] string repoReference,
+        [Argument] string? worktreeName = null,
+        bool createBranch = false,
+        string? baseRef = null,
+        int? pullRequestNumber = null)
     {
-        if (from is not null && !branch)
+        if (baseRef is not null && !createBranch)
         {
-            Console.Error.WriteLine("Error: --from/-f requires --branch/-b.");
+            Console.Error.WriteLine("Error: --baseRef/-f requires --createBranch/-b.");
             Environment.ExitCode = 1;
             return;
         }
 
-        if (pr is not null && (branch || from is not null))
+        if (pullRequestNumber is not null && (createBranch || baseRef is not null))
         {
-            Console.Error.WriteLine("Error: --pr/-p cannot be combined with --branch/-b or --from/-f.");
+            Console.Error.WriteLine("Error: --pullRequestNumber/-p cannot be combined with --createBranch/-b or --baseRef/-f.");
             Environment.ExitCode = 1;
             return;
         }
 
-        if (worktreename is null && pr is null)
+        if (worktreeName is null && pullRequestNumber is null)
         {
-            Console.Error.WriteLine("Error: worktreename is required unless --pr/-p is specified.");
+            Console.Error.WriteLine("Error: worktreeName is required unless --pullRequestNumber/-p is specified.");
             Environment.ExitCode = 1;
             return;
         }
 
-        worktreename ??= $"pr-{pr}";
+        worktreeName ??= $"pr-{pullRequestNumber}";
 
-        string[] entries = ReadWorktreesFile();
-        string repodir = ResolveRepoRef(reporef, entries) ?? reporef;
-        if (!entries.Contains(repodir, StringComparer.Ordinal))
+        IReadOnlyList<Worktree> managedRepositories = ReadWorktreesFile();
+
+        string repositoryDirectory;
+        if (TryResolveRepositoryReference(repoReference, managedRepositories, out string resolvedDirectory))
+            repositoryDirectory = resolvedDirectory;
+        else
+            repositoryDirectory = repoReference;
+
+        if (!managedRepositories.Any(repository => repository.RepositoryDirectory == repositoryDirectory))
         {
-            AnsiConsole.Write(new Markup($"[red]Error:[/] Repository not managed: [dim]{Markup.Escape(reporef)}[/]. Use 'add' first.\n"));
+            AnsiConsole.Write(new Markup($"[red]Error:[/] Repository not managed: [dim]{Markup.Escape(repoReference)}[/]. Use 'add' first.\n"));
             Environment.ExitCode = 1;
             return;
         }
 
-        string repoPath = Path.Combine(Config.SrcRootPath, repodir);
-        string worktreePath = Path.Combine(Config.SrcRootPath, $"{repodir}.worktrees", worktreename);
+        var worktree = new Worktree(repositoryDirectory);
+        string worktreePath = Path.Combine(worktree.WorktreesDirectoryPath, worktreeName);
 
-        List<string> gitArgs = ["worktree", "add"];
+        List<string> gitArguments = ["worktree", "add"];
 
-        if (branch)
+        if (createBranch)
         {
-            gitArgs.AddRange(["-b", worktreename, worktreePath]);
-            if (from is not null)
-                gitArgs.Add(from);
+            gitArguments.AddRange(["-b", worktreeName, worktreePath]);
+            if (baseRef is not null)
+                gitArguments.Add(baseRef);
         }
         else
         {
-            gitArgs.AddRange(["--detach", worktreePath]);
+            gitArguments.AddRange(["--detach", worktreePath]);
         }
 
-        BufferedCommandResult result = await Git.RunAsync(
-            [.. gitArgs],
-            workingDirectory: repoPath);
+        BufferedCommandResult gitResult = await Git.RunAsync(
+            [.. gitArguments],
+            workingDirectory: worktree.FullPath);
 
-        if (result.ExitCode != 0)
+        if (gitResult.ExitCode != 0)
         {
             Environment.ExitCode = 1;
             return;
         }
 
-        AnsiConsole.Write(new Markup($"Created worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {Markup.Escape(worktreePath)}\n"));
+        AnsiConsole.Write(new Markup($"Created worktree: [blue]{worktree.ComputeWorktreeId(worktreeName)}[/] {Markup.Escape(worktreePath)}\n"));
 
-        if (pr is not null)
+        if (pullRequestNumber is not null)
         {
-            result = await Gh.RunAsync(
-                ["pr", "checkout", pr.Value.ToString()],
+            BufferedCommandResult checkoutResult = await GitHubCli.RunAsync(
+                ["pr", "checkout", pullRequestNumber.Value.ToString()],
                 workingDirectory: worktreePath);
 
-            if (result.ExitCode != 0)
+            if (checkoutResult.ExitCode != 0)
             {
                 if (AnsiConsole.Confirm("PR checkout failed (branches may have diverged). Force checkout?", defaultValue: false))
                 {
-                    result = await Gh.RunAsync(
-                        ["pr", "checkout", pr.Value.ToString(), "--force"],
+                    checkoutResult = await GitHubCli.RunAsync(
+                        ["pr", "checkout", pullRequestNumber.Value.ToString(), "--force"],
                         workingDirectory: worktreePath);
 
-                    if (result.ExitCode != 0)
+                    if (checkoutResult.ExitCode != 0)
                     {
                         Environment.ExitCode = 1;
                         return;
                     }
 
-                    AnsiConsole.Write(new Markup($"Created worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {Markup.Escape(worktreePath)}\n"));
+                    AnsiConsole.Write(new Markup($"Created worktree: [blue]{worktree.ComputeWorktreeId(worktreeName)}[/] {Markup.Escape(worktreePath)}\n"));
                 }
                 else
                 {
@@ -263,73 +270,77 @@ public class WorktreeCommands
     }
 
     /// <summary>Print the path to a repo or worktree.</summary>
-    /// <param name="id">Repo name, repo ID, or worktree ID.</param>
+    /// <param name="reference">Repo name, repo ID, or worktree ID.</param>
     [Command("dir|d")]
-    public void Dir([Argument] string id)
+    public void Dir([Argument] string reference)
     {
-        string[] entries = ReadWorktreesFile();
-        (string Repo, string? Worktree)? resolved = ResolveRef(id, entries);
-        if (resolved is null)
+        IReadOnlyList<Worktree> managedRepositories = ReadWorktreesFile();
+
+        if (!TryResolveReference(reference, managedRepositories, out ResolvedRef resolved))
         {
-            Console.Error.WriteLine($"Error: Could not resolve ref: {id}.");
+            Console.Error.WriteLine($"Error: Could not resolve ref: {reference}.");
             Environment.ExitCode = 1;
             return;
         }
 
-        (string? repo, string? worktree) = resolved.Value;
-        string path = worktree is not null
-            ? Path.Combine(Config.SrcRootPath, $"{repo}.worktrees", worktree)
-            : Path.Combine(Config.SrcRootPath, repo);
-
-        Console.WriteLine(path);
+        Console.WriteLine(resolved.FullPath);
     }
 
     /// <summary>Remove a worktree, or untrack a repository.</summary>
-    /// <param name="reporef">Repo name, repo ID, or worktree ID.</param>
-    /// <param name="worktreename">Worktree to remove. If omitted, ref is resolved automatically.</param>
+    /// <param name="repoReference">Repo name, repo ID, or worktree ID.</param>
+    /// <param name="worktreeName">Worktree to remove. If omitted, ref is resolved automatically.</param>
     [Command("remove|rm")]
-    public async Task Remove([Argument] string reporef, [Argument] string? worktreename = null)
+    public async Task Remove([Argument] string repoReference, [Argument] string? worktreeName = null)
     {
-        string[] entries = ReadWorktreesFile();
+        IReadOnlyList<Worktree> managedRepositories = ReadWorktreesFile();
 
-        string repodir;
+        ResolvedRef resolved;
 
-        if (worktreename is not null)
+        if (worktreeName is not null)
         {
             // Two args: first is repo ref, second is worktree name
-            repodir = ResolveRepoRef(reporef, entries) ?? reporef;
-            if (!entries.Contains(repodir, StringComparer.Ordinal))
+            string repositoryDirectory;
+            if (TryResolveRepositoryReference(repoReference, managedRepositories, out string resolvedDirectory))
+                repositoryDirectory = resolvedDirectory;
+            else
+                repositoryDirectory = repoReference;
+
+            if (!managedRepositories.Any(repository => repository.RepositoryDirectory == repositoryDirectory))
             {
-                Console.Error.WriteLine($"Error: Repository not managed: {reporef}.");
+                Console.Error.WriteLine($"Error: Repository not managed: {repoReference}.");
                 Environment.ExitCode = 1;
                 return;
             }
+
+            resolved = new ResolvedRef(repositoryDirectory, worktreeName);
         }
         else
         {
             // Single arg: resolve as worktree ID, repo ID, or repo name
-            var resolved = ResolveRef(reporef, entries);
-            if (resolved is null)
+            if (!TryResolveReference(repoReference, managedRepositories, out resolved))
             {
-                Console.Error.WriteLine($"Error: Could not resolve ref: {reporef}.");
+                Console.Error.WriteLine($"Error: Could not resolve ref: {repoReference}.");
                 Environment.ExitCode = 1;
                 return;
             }
-            (repodir, worktreename) = resolved.Value;
         }
 
-        if (worktreename is null)
+        if (resolved.IsRepository)
         {
             // Remove repo from tracking
-            string[] updated = entries.Where(e => e != repodir).ToArray();
-            File.WriteAllLines(Config.WorktreesFilePath, updated);
-            AnsiConsole.Write(new Markup($"Removed from tracking: [purple]{RepoId(repodir)}[/] {Markup.Escape(repodir)}\n"));
+            string[] remainingDirectories = managedRepositories
+                .Where(repository => repository.RepositoryDirectory != resolved.RepositoryDirectory)
+                .Select(repository => repository.RepositoryDirectory)
+                .ToArray();
+            File.WriteAllLines(Config.WorktreesFilePath, remainingDirectories);
+            var removedWorktree = new Worktree(resolved.RepositoryDirectory);
+            AnsiConsole.Write(new Markup($"Removed from tracking: [purple]{removedWorktree.Id}[/] {Markup.Escape(resolved.RepositoryDirectory)}\n"));
             return;
         }
 
         // Remove individual worktree
-        string repoPath = Path.Combine(Config.SrcRootPath, repodir);
-        string worktreePath = Path.Combine(Config.SrcRootPath, $"{repodir}.worktrees", worktreename);
+        var worktree = new Worktree(resolved.RepositoryDirectory);
+        string worktreePath = resolved.FullPath;
 
         if (!Directory.Exists(worktreePath))
         {
@@ -338,86 +349,83 @@ public class WorktreeCommands
             return;
         }
 
-        BufferedCommandResult result = await Git.RunAsync(
+        BufferedCommandResult gitResult = await Git.RunAsync(
             ["worktree", "remove", worktreePath],
-            workingDirectory: repoPath);
+            workingDirectory: worktree.FullPath);
 
-        if (result.ExitCode != 0)
+        if (gitResult.ExitCode != 0)
         {
             Environment.ExitCode = 1;
             return;
         }
 
-        AnsiConsole.Write(new Markup($"Removed worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {Markup.Escape(worktreePath)}\n"));
+        AnsiConsole.Write(new Markup($"Removed worktree: [blue]{worktree.ComputeWorktreeId(resolved.WorktreeName!)}[/] {Markup.Escape(worktreePath)}\n"));
     }
 
-    static async Task<GitStatus?> GetGitStatusAsync(string workingDir)
+    static async Task<GitStatus?> GetGitStatusAsync(string workingDirectory)
     {
-        // Get branch, ahead/behind, and untracked count
         BufferedCommandResult statusResult = await Git.RunAsync(
             ["status", "-b", "--porcelain"],
-            workingDirectory: workingDir,
+            workingDirectory: workingDirectory,
             silent: true);
 
         if (statusResult.ExitCode != 0)
             return null;
 
-        string[] lines = statusResult.StandardOutput
+        string[] statusLines = statusResult.StandardOutput
             .Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
-        if (lines.Length == 0)
+        if (statusLines.Length == 0)
             return null;
 
         // Parse branch line: ## branch...upstream [ahead N, behind M]
-        string branchLine = lines[0];
-        string branch = "HEAD";
+        string branchLine = statusLines[0];
+        string branchName = "HEAD";
         int ahead = 0, behind = 0;
         bool hasUpstream = false;
 
         if (branchLine.StartsWith("## ", StringComparison.Ordinal))
         {
-            string rest = branchLine[3..];
-            int bracketIdx = rest.IndexOf('[');
-            string branchPart = bracketIdx >= 0 ? rest[..bracketIdx].Trim() : rest.Trim();
+            string branchInfo = branchLine[3..];
+            int bracketIndex = branchInfo.IndexOf('[');
+            string branchSegment = bracketIndex >= 0 ? branchInfo[..bracketIndex].Trim() : branchInfo.Trim();
 
-            int dotIdx = branchPart.IndexOf("...", StringComparison.Ordinal);
-            if (dotIdx >= 0)
+            int separatorIndex = branchSegment.IndexOf("...", StringComparison.Ordinal);
+            if (separatorIndex >= 0)
             {
-                branch = branchPart[..dotIdx];
+                branchName = branchSegment[..separatorIndex];
                 hasUpstream = true;
             }
             else
             {
-                branch = branchPart;
+                branchName = branchSegment;
             }
 
-            if (bracketIdx >= 0)
+            if (bracketIndex >= 0)
             {
-                int closeBracket = rest.IndexOf(']', bracketIdx);
-                if (closeBracket >= 0)
+                int closeBracketIndex = branchInfo.IndexOf(']', bracketIndex);
+                if (closeBracketIndex >= 0)
                 {
-                    string tracking = rest[(bracketIdx + 1)..closeBracket];
-                    foreach (string part in tracking.Split(',', StringSplitOptions.TrimEntries))
+                    string trackingInfo = branchInfo[(bracketIndex + 1)..closeBracketIndex];
+                    foreach (string trackingPart in trackingInfo.Split(',', StringSplitOptions.TrimEntries))
                     {
-                        if (part.StartsWith("ahead ", StringComparison.Ordinal)
-                            && int.TryParse(part[6..], out int a))
-                            ahead = a;
-                        else if (part.StartsWith("behind ", StringComparison.Ordinal)
-                            && int.TryParse(part[7..], out int b))
-                            behind = b;
+                        if (trackingPart.StartsWith("ahead ", StringComparison.Ordinal)
+                            && int.TryParse(trackingPart[6..], out int aheadCount))
+                            ahead = aheadCount;
+                        else if (trackingPart.StartsWith("behind ", StringComparison.Ordinal)
+                            && int.TryParse(trackingPart[7..], out int behindCount))
+                            behind = behindCount;
                     }
                 }
             }
         }
 
-        // Count untracked files (lines starting with ??)
-        int untrackedFiles = lines.Skip(1).Count(l => l.StartsWith("??", StringComparison.Ordinal));
+        int untrackedFiles = statusLines.Skip(1).Count(line => line.StartsWith("??", StringComparison.Ordinal));
 
-        // Get total line additions/deletions (staged + unstaged vs HEAD)
         int additions = 0, deletions = 0;
         BufferedCommandResult diffResult = await Git.RunAsync(
             ["diff", "HEAD", "--numstat"],
-            workingDirectory: workingDir,
+            workingDirectory: workingDirectory,
             silent: true);
 
         if (diffResult.ExitCode == 0)
@@ -425,256 +433,261 @@ public class WorktreeCommands
             foreach (string diffLine in diffResult.StandardOutput
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
-                string[] parts = diffLine.Split('\t');
-                if (parts.Length >= 2
-                    && int.TryParse(parts[0], out int add)
-                    && int.TryParse(parts[1], out int del))
+                string[] columns = diffLine.Split('\t');
+                if (columns.Length >= 2
+                    && int.TryParse(columns[0], out int addedLines)
+                    && int.TryParse(columns[1], out int deletedLines))
                 {
-                    additions += add;
-                    deletions += del;
+                    additions += addedLines;
+                    deletions += deletedLines;
                 }
             }
         }
 
-        return new GitStatus(branch, ahead, behind, hasUpstream, additions, deletions, untrackedFiles);
+        return new GitStatus(branchName, ahead, behind, hasUpstream, additions, deletions, untrackedFiles);
     }
 
-    const int NameColumnWidth = 40;
-
-    static IRenderable RenderRepoEntry(
-        string entry,
-        GitStatus? repoStatus,
-        List<(string Wt, GitStatus? Status)> worktrees,
-        Dictionary<string, PullRequestInfo> prs)
+    static async Task<Dictionary<string, PullRequestInfo>> GetPullRequestsAsync(string workingDirectory)
     {
-        var lines = new List<IRenderable>
-        {
-            RenderRepoLine(entry, repoStatus, prs)
-        };
-        foreach (var (wt, status) in worktrees)
-            lines.Add(RenderWorktreeLine(entry, wt, status, prs));
-        return new Rows(lines);
-    }
-
-    static Grid RenderRepoLine(
-        string entry, GitStatus? status, Dictionary<string, PullRequestInfo> prs)
-    {
-        string branch = TruncateBranch(status?.Branch, 3 + 1 + entry.Length);
-        var col1 = new Markup($"[purple]{RepoId(entry)}[/] {Markup.Escape(entry)}{branch}");
-
-        string indicators = FormatGitIndicators(status);
-        int col2Width = AnsiConsole.Profile.Width - NameColumnWidth;
-        string prInfo = FormatPrInfo(status?.Branch, prs, col2Width - Markup.Remove(indicators).Length);
-        var col2 = new Markup($"{indicators}{prInfo}");
-
-        return new Grid()
-            .AddColumn(new GridColumn { Width = NameColumnWidth })
-            .AddColumn(new GridColumn { NoWrap = true })
-            .AddRow(col1, col2);
-    }
-
-    static Grid RenderWorktreeLine(
-        string entry, string wt, GitStatus? status, Dictionary<string, PullRequestInfo> prs)
-    {
-        string branch = TruncateBranch(status?.Branch, 4 + 3 + 1 + wt.Length);
-        var col1 = new Markup($"    [blue]{WorktreeId(entry, wt)}[/] {Markup.Escape(wt)}{branch}");
-
-        string indicators = FormatGitIndicators(status);
-        int col2Width = AnsiConsole.Profile.Width - NameColumnWidth;
-        string prInfo = FormatPrInfo(status?.Branch, prs, col2Width - Markup.Remove(indicators).Length);
-        var col2 = new Markup($"{indicators}{prInfo}");
-
-        return new Grid()
-            .AddColumn(new GridColumn { Width = NameColumnWidth })
-            .AddColumn(new GridColumn { NoWrap = true })
-            .AddRow(col1, col2);
-    }
-
-    static string TruncateBranch(string? branchName, int prefixLen)
-    {
-        if (branchName is null)
-            return "";
-
-        // -1 for the space before branch, -1 for Grid column padding
-        int available = NameColumnWidth - prefixLen - 1 - 1;
-        if (branchName.Length > available && available > 1)
-            return $" [dim]{Markup.Escape(string.Concat(branchName.AsSpan(0, available - 1), "…"))}[/]";
-
-        return $" [dim]{Markup.Escape(branchName)}[/]";
-    }
-
-    static string FormatPrInfo(
-        string? branch, Dictionary<string, PullRequestInfo> prs, int availableWidth)
-    {
-        if (branch is null || !prs.TryGetValue(branch, out PullRequestInfo? pr))
-            return "";
-
-        string stateMarkup = FormatPrState(pr.State);
-        int stateLen = Markup.Remove(stateMarkup).Length;
-
-        // " [open] #42 " overhead
-        int overhead = 1 + stateLen + 1 + 1 + pr.Number.ToString().Length + 1;
-        int availableForTitle = availableWidth - overhead;
-
-        string title = pr.Title;
-        if (availableForTitle <= 0)
-            title = "";
-        else if (title.Length > availableForTitle)
-            title = string.Concat(title.AsSpan(0, availableForTitle - 1), "…");
-
-        return $" {stateMarkup} [cyan]#{pr.Number}[/] {Markup.Escape(title)}";
-    }
-
-    static string FormatPrState(string state) => state switch
-    {
-        "OPEN" => "[green][[open]][/]",
-        "MERGED" => "[purple][[merged]][/]",
-        "CLOSED" => "[red][[closed]][/]",
-        _ => $"[dim][[{Markup.Escape(state.ToLowerInvariant())}]][/]",
-    };
-
-    static async Task<Dictionary<string, PullRequestInfo>> GetOpenPrsAsync(string workingDir)
-    {
-        var result = new Dictionary<string, PullRequestInfo>(StringComparer.Ordinal);
-
-        BufferedCommandResult ghResult = await Gh.RunAsync(
+        BufferedCommandResult commandResult = await GitHubCli.RunAsync(
             ["pr", "list", "--state", "all", "--json", "number,title,headRefName,state"],
-            workingDirectory: workingDir,
+            workingDirectory: workingDirectory,
             silent: true);
 
-        if (ghResult.ExitCode != 0)
-            return result;
+        if (commandResult.ExitCode != 0)
+            return new Dictionary<string, PullRequestInfo>(StringComparer.Ordinal);
 
+        GitHubPullRequestDto[] pullRequestDtos;
         try
         {
-            using JsonDocument doc = JsonDocument.Parse(ghResult.StandardOutput);
-            foreach (JsonElement pr in doc.RootElement.EnumerateArray())
-            {
-                string branch = pr.GetProperty("headRefName").GetString() ?? "";
-                int number = pr.GetProperty("number").GetInt32();
-                string title = pr.GetProperty("title").GetString() ?? "";
-                string state = pr.GetProperty("state").GetString() ?? "OPEN";
-                result.TryAdd(branch, new PullRequestInfo(number, title, state));
-            }
+            pullRequestDtos = JsonSerializer.Deserialize(commandResult.StandardOutput, GitHubJsonContext.Default.GitHubPullRequestDtoArray) ?? [];
         }
         catch (JsonException)
         {
-            // Graceful degradation: ignore malformed output
+            return new Dictionary<string, PullRequestInfo>(StringComparer.Ordinal);
         }
 
-        return result;
+        var pullRequestsByBranch = new Dictionary<string, PullRequestInfo>(StringComparer.Ordinal);
+        foreach (GitHubPullRequestDto pullRequestDto in pullRequestDtos)
+        {
+            pullRequestsByBranch.TryAdd(
+                pullRequestDto.HeadRefName,
+                new PullRequestInfo(pullRequestDto.Number, pullRequestDto.Title, pullRequestDto.State));
+        }
+        return pullRequestsByBranch;
     }
 
-    static string FormatGitIndicators(GitStatus? status)
-    {
-        if (status is null)
-            return "";
-
-        var sb = new StringBuilder();
-
-        // Ahead/behind
-        if (!status.HasUpstream)
-        {
-            sb.Append("[dim]~[/]");
-        }
-        else if (status.Ahead == 0 && status.Behind == 0)
-        {
-            sb.Append("[green]✓[/]");
-        }
-        else
-        {
-            if (status.Ahead > 0) sb.Append($"[yellow]↑{status.Ahead}[/]");
-            if (status.Behind > 0) sb.Append($"[yellow]↓{status.Behind}[/]");
-        }
-
-        // Changes: +N/-M or -/-
-        if (status.Additions == 0 && status.Deletions == 0)
-        {
-            sb.Append(" [dim]-[/]/[dim]-[/]");
-        }
-        else
-        {
-            sb.Append($" [green]+{status.Additions}[/]/[red]-{status.Deletions}[/]");
-        }
-
-        // Untracked files
-        if (status.UntrackedFiles > 0)
-        {
-            sb.Append($"/{status.UntrackedFiles}[green]u[/]");
-        }
-
-        return sb.ToString();
-    }
-
-    static string[] ReadWorktreesFile()
+    static IReadOnlyList<Worktree> ReadWorktreesFile()
     {
         if (!File.Exists(Config.WorktreesFilePath))
             return [];
 
         return File.ReadAllLines(Config.WorktreesFilePath)
             .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Select(line => new Worktree(line))
             .ToArray();
     }
-
-    // FNV-1a 32-bit hash → 3 hex chars (12 bits)
-    static string ShortId(string input)
-    {
-        uint hash = 2166136261;
-        foreach (char c in input)
-        {
-            hash ^= c;
-            hash *= 16777619;
-        }
-        return (hash & 0xFFF).ToString("x3");
-    }
-
-    static string RepoId(string repodir) => ShortId($"repo:{repodir}");
-    static string WorktreeId(string repodir, string worktree) => ShortId($"wt:{repodir}/{worktree}");
 
     /// <summary>
     /// Resolves a ref (short ID or exact name) to a (repo, worktree?) pair.
     /// Checks worktree IDs first, then repo IDs, then exact repo names.
     /// </summary>
-    static (string Repo, string? Worktree)? ResolveRef(string input, string[] entries)
+    static bool TryResolveReference(
+        string reference, IReadOnlyList<Worktree> managedRepositories, out ResolvedRef resolvedReference)
     {
         // Check worktree IDs
-        foreach (string repo in entries)
+        foreach (Worktree repository in managedRepositories)
         {
-            string wtDir = Path.Combine(Config.SrcRootPath, $"{repo}.worktrees");
-            if (!Directory.Exists(wtDir)) continue;
-            foreach (string dir in Directory.GetDirectories(wtDir))
+            if (!Directory.Exists(repository.WorktreesDirectoryPath)) continue;
+            foreach (string worktreeDirectory in Directory.GetDirectories(repository.WorktreesDirectoryPath))
             {
-                string wt = Path.GetFileName(dir);
-                if (WorktreeId(repo, wt) == input)
-                    return (repo, wt);
+                string worktreeName = Path.GetFileName(worktreeDirectory);
+                if (repository.ComputeWorktreeId(worktreeName) == reference)
+                {
+                    resolvedReference = new ResolvedRef(repository.RepositoryDirectory, worktreeName);
+                    return true;
+                }
             }
         }
 
         // Check repo IDs
-        foreach (string repo in entries)
+        foreach (Worktree repository in managedRepositories)
         {
-            if (RepoId(repo) == input)
-                return (repo, null);
+            if (repository.Id == reference)
+            {
+                resolvedReference = new ResolvedRef(repository.RepositoryDirectory, WorktreeName: null);
+                return true;
+            }
         }
 
         // Check exact repo names
-        if (entries.Contains(input, StringComparer.Ordinal))
-            return (input, null);
+        if (managedRepositories.Any(repository => repository.RepositoryDirectory == reference))
+        {
+            resolvedReference = new ResolvedRef(reference, WorktreeName: null);
+            return true;
+        }
 
-        return null;
+        resolvedReference = default;
+        return false;
     }
 
     /// <summary>Resolves a ref to a repo name only (ID or exact name).</summary>
-    static string? ResolveRepoRef(string input, string[] entries)
+    static bool TryResolveRepositoryReference(
+        string reference, IReadOnlyList<Worktree> managedRepositories, out string repositoryDirectory)
     {
-        foreach (string repo in entries)
+        foreach (Worktree repository in managedRepositories)
         {
-            if (RepoId(repo) == input)
-                return repo;
+            if (repository.Id == reference)
+            {
+                repositoryDirectory = repository.RepositoryDirectory;
+                return true;
+            }
         }
-        if (entries.Contains(input, StringComparer.Ordinal))
-            return input;
-        return null;
+
+        if (managedRepositories.Any(repository => repository.RepositoryDirectory == reference))
+        {
+            repositoryDirectory = reference;
+            return true;
+        }
+
+        repositoryDirectory = "";
+        return false;
+    }
+}
+
+static class ListRenderer
+{
+    const int NameColumnWidth = 40;
+
+    public static IRenderable RenderRepositoryEntry(
+        Worktree repository,
+        GitStatus? repositoryStatus,
+        List<WorktreeStatus> worktreeStatuses,
+        Dictionary<string, PullRequestInfo> pullRequests)
+    {
+        var renderedLines = new List<IRenderable>
+        {
+            RenderRepositoryLine(repository, repositoryStatus, pullRequests)
+        };
+        foreach (WorktreeStatus worktreeStatus in worktreeStatuses)
+            renderedLines.Add(RenderWorktreeLine(repository, worktreeStatus.Name, worktreeStatus.Status, pullRequests));
+        return new Rows(renderedLines);
+    }
+
+    static Grid RenderRepositoryLine(
+        Worktree repository, GitStatus? gitStatus, Dictionary<string, PullRequestInfo> pullRequests)
+    {
+        string formattedBranch = TruncateBranch(gitStatus?.Branch, 3 + 1 + repository.RepositoryDirectory.Length);
+        var nameColumn = new Markup($"[purple]{repository.Id}[/] {Markup.Escape(repository.RepositoryDirectory)}{formattedBranch}");
+
+        string gitIndicators = FormatGitIndicators(gitStatus);
+        int statusColumnWidth = AnsiConsole.Profile.Width - NameColumnWidth;
+        string pullRequestText = FormatPullRequestInfo(gitStatus?.Branch, pullRequests, statusColumnWidth - Markup.Remove(gitIndicators).Length);
+        var statusColumn = new Markup($"{gitIndicators}{pullRequestText}");
+
+        return new Grid()
+            .AddColumn(new GridColumn { Width = NameColumnWidth })
+            .AddColumn(new GridColumn { NoWrap = true })
+            .AddRow(nameColumn, statusColumn);
+    }
+
+    static Grid RenderWorktreeLine(
+        Worktree repository, string worktreeName, GitStatus? gitStatus, Dictionary<string, PullRequestInfo> pullRequests)
+    {
+        string formattedBranch = TruncateBranch(gitStatus?.Branch, 4 + 3 + 1 + worktreeName.Length);
+        var nameColumn = new Markup($"    [blue]{repository.ComputeWorktreeId(worktreeName)}[/] {Markup.Escape(worktreeName)}{formattedBranch}");
+
+        string gitIndicators = FormatGitIndicators(gitStatus);
+        int statusColumnWidth = AnsiConsole.Profile.Width - NameColumnWidth;
+        string pullRequestText = FormatPullRequestInfo(gitStatus?.Branch, pullRequests, statusColumnWidth - Markup.Remove(gitIndicators).Length);
+        var statusColumn = new Markup($"{gitIndicators}{pullRequestText}");
+
+        return new Grid()
+            .AddColumn(new GridColumn { Width = NameColumnWidth })
+            .AddColumn(new GridColumn { NoWrap = true })
+            .AddRow(nameColumn, statusColumn);
+    }
+
+    static string TruncateBranch(string? branchName, int prefixLength)
+    {
+        if (branchName is null)
+            return "";
+
+        // -1 for the space before branch, -1 for Grid column padding
+        int available = NameColumnWidth - prefixLength - 1 - 1;
+        if (branchName.Length > available && available > 1)
+            return $" [dim]{Markup.Escape(string.Concat(branchName.AsSpan(0, available - 1), "…"))}[/]";
+
+        return $" [dim]{Markup.Escape(branchName)}[/]";
+    }
+
+    static string FormatPullRequestInfo(
+        string? branchName, Dictionary<string, PullRequestInfo> pullRequests, int availableWidth)
+    {
+        if (branchName is null || !pullRequests.TryGetValue(branchName, out PullRequestInfo? pullRequest))
+            return "";
+
+        string numberMarkup = pullRequest.State switch
+        {
+            "OPEN" => $"[green]#{pullRequest.Number}[/]",
+            "MERGED" => $"[purple]#{pullRequest.Number}[/]",
+            "CLOSED" => $"[red]#{pullRequest.Number}[/]",
+            _ => $"[dim]#{pullRequest.Number}[/]",
+        };
+        int numberLength = Markup.Remove(numberMarkup).Length;
+
+        // " #42 " overhead
+        int overhead = 1 + numberLength + 1;
+        int availableForTitle = availableWidth - overhead;
+
+        string displayTitle = pullRequest.Title;
+        if (availableForTitle <= 0)
+            displayTitle = "";
+        else if (displayTitle.Length > availableForTitle)
+            displayTitle = string.Concat(displayTitle.AsSpan(0, availableForTitle - 1), "…");
+
+        return $" {numberMarkup} {Markup.Escape(displayTitle)}";
+    }
+
+    static string FormatGitIndicators(GitStatus? gitStatus)
+    {
+        if (gitStatus is null)
+            return "";
+
+        var builder = new StringBuilder();
+
+        // Ahead/behind
+        if (!gitStatus.HasUpstream)
+        {
+            builder.Append("[dim]~[/]");
+        }
+        else if (gitStatus.Ahead == 0 && gitStatus.Behind == 0)
+        {
+            builder.Append("[green]✓[/]");
+        }
+        else
+        {
+            if (gitStatus.Ahead > 0) builder.Append($"[yellow]↑{gitStatus.Ahead}[/]");
+            if (gitStatus.Behind > 0) builder.Append($"[yellow]↓{gitStatus.Behind}[/]");
+        }
+
+        // Changes: +N/-M or -/-
+        if (gitStatus.Additions == 0 && gitStatus.Deletions == 0)
+        {
+            builder.Append(" [dim]-[/]/[dim]-[/]");
+        }
+        else
+        {
+            builder.Append($" [green]+{gitStatus.Additions}[/]/[red]-{gitStatus.Deletions}[/]");
+        }
+
+        // Untracked files
+        if (gitStatus.UntrackedFiles > 0)
+        {
+            builder.Append($"/{gitStatus.UntrackedFiles}[green]u[/]");
+        }
+
+        return builder.ToString();
     }
 }
 
@@ -682,11 +695,62 @@ record GitStatus(string Branch, int Ahead, int Behind, bool HasUpstream, int Add
 
 record PullRequestInfo(int Number, string Title, string State);
 
-internal class CliWrapper(string command)
+record Worktree(string RepositoryDirectory)
 {
-    readonly PipeTarget _stdOutPipe =
+    public string Id => ComputeShortId($"repo:{RepositoryDirectory}");
+    public string FullPath => Path.Combine(Config.SourceRootPath, RepositoryDirectory);
+    public string WorktreesDirectoryPath => Path.Combine(Config.SourceRootPath, $"{RepositoryDirectory}.worktrees");
+
+    public string ComputeWorktreeId(string worktreeName) => ComputeShortId($"wt:{RepositoryDirectory}/{worktreeName}");
+
+    // FNV-1a 32-bit hash → 3 hex chars (12 bits)
+    static string ComputeShortId(string identifier)
+    {
+        uint hash = 2166136261;
+        foreach (char character in identifier)
+        {
+            hash ^= character;
+            hash *= 16777619;
+        }
+        return (hash & 0xFFF).ToString("x3");
+    }
+}
+
+record struct DirectoryEntry(string RepositoryDirectory, string? WorktreeName, string DirectoryPath);
+
+record struct WorktreeStatus(string Name, GitStatus? Status);
+
+record struct ResolvedRef(string RepositoryDirectory, string? WorktreeName)
+{
+    public readonly bool IsRepository => WorktreeName is null;
+    public readonly bool IsWorktree => WorktreeName is not null;
+
+    public readonly string FullPath
+    {
+        get
+        {
+            var worktree = new Worktree(RepositoryDirectory);
+            return IsWorktree
+                ? Path.Combine(worktree.WorktreesDirectoryPath, WorktreeName!)
+                : worktree.FullPath;
+        }
+    }
+}
+
+[JsonSerializable(typeof(GitHubPullRequestDto[]))]
+partial class GitHubJsonContext : JsonSerializerContext;
+
+record struct GitHubPullRequestDto(
+    [property: JsonPropertyName("number")] int Number,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("headRefName")] string HeadRefName,
+    [property: JsonPropertyName("state")] string State);
+
+internal class CliWrapper(string executableName)
+{
+    readonly PipeTarget _standardOutputPipe =
         PipeTarget.ToDelegate(line => AnsiConsole.Write(new Markup($"[dim][[stdout]] {Markup.Escape(line)}[/]\n")));
-    readonly PipeTarget _stdErrPipe =
+    readonly PipeTarget _standardErrorPipe =
         PipeTarget.ToDelegate(line => AnsiConsole.Write(new Markup($"[dim][[stderr]] {Markup.Escape(line)}[/]\n")));
 
     public async Task<BufferedCommandResult> RunAsync(
@@ -695,20 +759,20 @@ internal class CliWrapper(string command)
         bool silent = false,
         CancellationToken cancellationToken = default)
     {
-        Command cmd = Cli.Wrap(command)
+        Command cliCommand = Cli.Wrap(executableName)
             .WithArguments(arguments)
             .WithValidation(CommandResultValidation.None);
 
         if (workingDirectory is not null)
-            cmd = cmd.WithWorkingDirectory(workingDirectory);
+            cliCommand = cliCommand.WithWorkingDirectory(workingDirectory);
 
         if (!silent)
         {
-            cmd = cmd.WithStandardOutputPipe(_stdOutPipe).WithStandardErrorPipe(_stdErrPipe);
-            string commandString = Markup.Escape($"{command} {string.Join(' ', arguments)}");
+            cliCommand = cliCommand.WithStandardOutputPipe(_standardOutputPipe).WithStandardErrorPipe(_standardErrorPipe);
+            string commandString = Markup.Escape($"{executableName} {string.Join(' ', arguments)}");
             AnsiConsole.Write(new Markup($"[blue][[exec]] {commandString}[/]\n"));
         }
 
-        return await cmd.ExecuteBufferedAsync(Encoding.UTF8, Encoding.UTF8, cancellationToken);
+        return await cliCommand.ExecuteBufferedAsync(Encoding.UTF8, Encoding.UTF8, cancellationToken);
     }
 }
