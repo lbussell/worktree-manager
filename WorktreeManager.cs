@@ -439,6 +439,8 @@ public class WorktreeCommands
         return new GitStatus(branch, ahead, behind, hasUpstream, additions, deletions, untrackedFiles);
     }
 
+    const int NameColumnWidth = 40;
+
     static IRenderable RenderRepoEntry(
         string entry,
         GitStatus? repoStatus,
@@ -454,36 +456,65 @@ public class WorktreeCommands
         return new Rows(lines);
     }
 
-    static Markup RenderRepoLine(
+    static Grid RenderRepoLine(
         string entry, GitStatus? status, Dictionary<string, PullRequestInfo> prs)
     {
-        string statusMarkup = FormatGitStatus(status);
-        string prefix = $"[purple]{RepoId(entry)}[/] {Markup.Escape(entry)}{statusMarkup}";
-        return new Markup(AppendPrInfo(prefix, status?.Branch, prs));
+        string branch = TruncateBranch(status?.Branch, 3 + 1 + entry.Length);
+        var col1 = new Markup($"[purple]{RepoId(entry)}[/] {Markup.Escape(entry)}{branch}");
+
+        string indicators = FormatGitIndicators(status);
+        int col2Width = AnsiConsole.Profile.Width - NameColumnWidth;
+        string prInfo = FormatPrInfo(status?.Branch, prs, col2Width - Markup.Remove(indicators).Length);
+        var col2 = new Markup($"{indicators}{prInfo}");
+
+        return new Grid()
+            .AddColumn(new GridColumn { Width = NameColumnWidth })
+            .AddColumn(new GridColumn { NoWrap = true })
+            .AddRow(col1, col2);
     }
 
-    static Markup RenderWorktreeLine(
+    static Grid RenderWorktreeLine(
         string entry, string wt, GitStatus? status, Dictionary<string, PullRequestInfo> prs)
     {
-        string wtStatus = FormatGitStatus(status);
-        string prefix = $"    [blue]{WorktreeId(entry, wt)}[/] {Markup.Escape(wt)}{wtStatus}";
-        return new Markup(AppendPrInfo(prefix, status?.Branch, prs));
+        string branch = TruncateBranch(status?.Branch, 4 + 3 + 1 + wt.Length);
+        var col1 = new Markup($"    [blue]{WorktreeId(entry, wt)}[/] {Markup.Escape(wt)}{branch}");
+
+        string indicators = FormatGitIndicators(status);
+        int col2Width = AnsiConsole.Profile.Width - NameColumnWidth;
+        string prInfo = FormatPrInfo(status?.Branch, prs, col2Width - Markup.Remove(indicators).Length);
+        var col2 = new Markup($"{indicators}{prInfo}");
+
+        return new Grid()
+            .AddColumn(new GridColumn { Width = NameColumnWidth })
+            .AddColumn(new GridColumn { NoWrap = true })
+            .AddRow(col1, col2);
     }
 
-    static string AppendPrInfo(
-        string prefixMarkup, string? branch, Dictionary<string, PullRequestInfo> prs)
+    static string TruncateBranch(string? branchName, int prefixLen)
+    {
+        if (branchName is null)
+            return "";
+
+        // -1 for the space before branch, -1 for Grid column padding
+        int available = NameColumnWidth - prefixLen - 1 - 1;
+        if (branchName.Length > available && available > 1)
+            return $" [dim]{Markup.Escape(string.Concat(branchName.AsSpan(0, available - 1), "…"))}[/]";
+
+        return $" [dim]{Markup.Escape(branchName)}[/]";
+    }
+
+    static string FormatPrInfo(
+        string? branch, Dictionary<string, PullRequestInfo> prs, int availableWidth)
     {
         if (branch is null || !prs.TryGetValue(branch, out PullRequestInfo? pr))
-            return prefixMarkup;
+            return "";
 
-        int width = AnsiConsole.Profile.Width;
-        int prefixLen = Markup.Remove(prefixMarkup).Length;
         string stateMarkup = FormatPrState(pr.State);
         int stateLen = Markup.Remove(stateMarkup).Length;
 
         // " [open] #42 " overhead
         int overhead = 1 + stateLen + 1 + 1 + pr.Number.ToString().Length + 1;
-        int availableForTitle = width - prefixLen - overhead;
+        int availableForTitle = availableWidth - overhead;
 
         string title = pr.Title;
         if (availableForTitle <= 0)
@@ -491,7 +522,7 @@ public class WorktreeCommands
         else if (title.Length > availableForTitle)
             title = string.Concat(title.AsSpan(0, availableForTitle - 1), "…");
 
-        return $"{prefixMarkup} {stateMarkup} [cyan]#{pr.Number}[/] {Markup.Escape(title)}";
+        return $" {stateMarkup} [cyan]#{pr.Number}[/] {Markup.Escape(title)}";
     }
 
     static string FormatPrState(string state) => state switch
@@ -534,28 +565,24 @@ public class WorktreeCommands
         return result;
     }
 
-    static string FormatGitStatus(GitStatus? status)
+    static string FormatGitIndicators(GitStatus? status)
     {
         if (status is null)
             return "";
 
         var sb = new StringBuilder();
 
-        // Branch name (dim)
-        sb.Append($" [dim]{Markup.Escape(status.Branch)}[/]");
-
         // Ahead/behind
         if (!status.HasUpstream)
         {
-            sb.Append(" [dim]~[/]");
+            sb.Append("[dim]~[/]");
         }
         else if (status.Ahead == 0 && status.Behind == 0)
         {
-            sb.Append(" [green]✓[/]");
+            sb.Append("[green]✓[/]");
         }
         else
         {
-            sb.Append(' ');
             if (status.Ahead > 0) sb.Append($"[yellow]↑{status.Ahead}[/]");
             if (status.Behind > 0) sb.Append($"[yellow]↓{status.Behind}[/]");
         }
