@@ -34,6 +34,7 @@ using ConsoleAppFramework;
 using CliWrap;
 using CliWrap.Buffered;
 using Spectre.Console;
+using Spectre.Console.Rendering;
 
 var app = ConsoleApp.Create();
 app.Add<WorktreeCommands>();
@@ -66,7 +67,7 @@ public class WorktreeCommands
 
         if (!Directory.Exists(repoPath))
         {
-            AnsiConsole.MarkupLineInterpolated($"[red]Error:[/] Directory does not exist: [dim]{repoPath}[/]");
+            AnsiConsole.Write(new Markup($"[red]Error:[/] Directory does not exist: [dim]{Markup.Escape(repoPath)}[/]\n"));
             Environment.ExitCode = 1;
             return;
         }
@@ -78,7 +79,7 @@ public class WorktreeCommands
 
         if (result.ExitCode != 0)
         {
-            AnsiConsole.MarkupLineInterpolated($"[red]Error:[/] Not a git repository: [dim]{repoPath}[/]");
+            AnsiConsole.Write(new Markup($"[red]Error:[/] Not a git repository: [dim]{Markup.Escape(repoPath)}[/]\n"));
             Environment.ExitCode = 1;
             return;
         }
@@ -86,7 +87,7 @@ public class WorktreeCommands
         string[] entries = ReadWorktreesFile();
         if (entries.Contains(repodir, StringComparer.Ordinal))
         {
-            AnsiConsole.MarkupLineInterpolated($"Already registered: [purple]{RepoId(repodir)}[/] {repodir}");
+            AnsiConsole.Write(new Markup($"Already registered: [purple]{RepoId(repodir)}[/] {Markup.Escape(repodir)}\n"));
             return;
         }
 
@@ -95,7 +96,7 @@ public class WorktreeCommands
         string worktreesDir = Path.Combine(Config.SrcRootPath, $"{repodir}.worktrees");
         Directory.CreateDirectory(worktreesDir);
 
-        AnsiConsole.MarkupLineInterpolated($"Added [purple]{RepoId(repodir)}[/] {repodir}");
+        AnsiConsole.Write(new Markup($"Added [purple]{RepoId(repodir)}[/] {Markup.Escape(repodir)}\n"));
     }
 
     /// <summary>List all managed repositories and their worktrees.</summary>
@@ -106,7 +107,7 @@ public class WorktreeCommands
 
         if (entries.Length == 0)
         {
-            AnsiConsole.MarkupLineInterpolated($"[yellow]No repositories registered.[/] Use 'add' to register one.");
+            AnsiConsole.Write(new Markup("[yellow]No repositories registered.[/] Use 'add' to register one.\n"));
             return;
         }
 
@@ -130,29 +131,29 @@ public class WorktreeCommands
             e => GetOpenPrsAsync(Path.Combine(Config.SrcRootPath, e)));
         await Task.WhenAll(statusTasks.Values.Cast<Task>().Concat(prTasks.Values));
 
-        // Display
+        // Compose view declaratively
+        var renderables = new List<IRenderable>();
         foreach (string entry in entries)
         {
             var prs = prTasks[entry].Result;
-
             var repoKey = items.First(i => i.Entry == entry && i.Worktree is null);
-            string statusMarkup = FormatGitStatus(statusTasks[repoKey].Result);
-            string prefix = $"[purple]{RepoId(entry)}[/] {Markup.Escape(entry)}{statusMarkup}";
-            WriteListLine(prefix, statusTasks[repoKey].Result?.Branch, prs);
 
+            var worktrees = new List<(string Wt, GitStatus? Status)>();
             string worktreesDir = Path.Combine(Config.SrcRootPath, $"{entry}.worktrees");
-            if (!Directory.Exists(worktreesDir))
-                continue;
-
-            foreach (string dir in Directory.GetDirectories(worktreesDir))
+            if (Directory.Exists(worktreesDir))
             {
-                string wt = Path.GetFileName(dir);
-                var wtKey = items.First(i => i.Entry == entry && i.Worktree == wt);
-                string wtStatus = FormatGitStatus(statusTasks[wtKey].Result);
-                string wtPrefix = $"    [blue]{WorktreeId(entry, wt)}[/] {Markup.Escape(wt)}{wtStatus}";
-                WriteListLine(wtPrefix, statusTasks[wtKey].Result?.Branch, prs);
+                foreach (string dir in Directory.GetDirectories(worktreesDir))
+                {
+                    string wt = Path.GetFileName(dir);
+                    var wtKey = items.First(i => i.Entry == entry && i.Worktree == wt);
+                    worktrees.Add((wt, statusTasks[wtKey].Result));
+                }
             }
+
+            renderables.Add(RenderRepoEntry(entry, statusTasks[repoKey].Result, worktrees, prs));
         }
+
+        AnsiConsole.Write(new Rows(renderables));
     }
 
     /// <summary>Create a new worktree for a managed repository.</summary>
@@ -196,7 +197,7 @@ public class WorktreeCommands
         string repodir = ResolveRepoRef(reporef, entries) ?? reporef;
         if (!entries.Contains(repodir, StringComparer.Ordinal))
         {
-            AnsiConsole.MarkupLineInterpolated($"[red]Error:[/] Repository not managed: [dim]{reporef}[/]. Use 'add' first.");
+            AnsiConsole.Write(new Markup($"[red]Error:[/] Repository not managed: [dim]{Markup.Escape(reporef)}[/]. Use 'add' first.\n"));
             Environment.ExitCode = 1;
             return;
         }
@@ -227,7 +228,7 @@ public class WorktreeCommands
             return;
         }
 
-        AnsiConsole.MarkupLineInterpolated($"Created worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {worktreePath}");
+        AnsiConsole.Write(new Markup($"Created worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {Markup.Escape(worktreePath)}\n"));
 
         if (pr is not null)
         {
@@ -249,11 +250,11 @@ public class WorktreeCommands
                         return;
                     }
 
-                    AnsiConsole.MarkupLineInterpolated($"Created worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {worktreePath}");
+                    AnsiConsole.Write(new Markup($"Created worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {Markup.Escape(worktreePath)}\n"));
                 }
                 else
                 {
-                    AnsiConsole.MarkupLine("Worktree created but PR not checked out.");
+                    AnsiConsole.Write(new Markup("Worktree created but PR not checked out.\n"));
                     Environment.ExitCode = 1;
                     return;
                 }
@@ -322,7 +323,7 @@ public class WorktreeCommands
             // Remove repo from tracking
             string[] updated = entries.Where(e => e != repodir).ToArray();
             File.WriteAllLines(Config.WorktreesFilePath, updated);
-            AnsiConsole.MarkupLineInterpolated($"Removed from tracking: [purple]{RepoId(repodir)}[/] {repodir}");
+            AnsiConsole.Write(new Markup($"Removed from tracking: [purple]{RepoId(repodir)}[/] {Markup.Escape(repodir)}\n"));
             return;
         }
 
@@ -347,7 +348,7 @@ public class WorktreeCommands
             return;
         }
 
-        AnsiConsole.MarkupLineInterpolated($"Removed worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {worktreePath}");
+        AnsiConsole.Write(new Markup($"Removed worktree: [blue]{WorktreeId(repodir, worktreename)}[/] {Markup.Escape(worktreePath)}\n"));
     }
 
     static async Task<GitStatus?> GetGitStatusAsync(string workingDir)
@@ -438,14 +439,42 @@ public class WorktreeCommands
         return new GitStatus(branch, ahead, behind, hasUpstream, additions, deletions, untrackedFiles);
     }
 
-    static void WriteListLine(
+    static IRenderable RenderRepoEntry(
+        string entry,
+        GitStatus? repoStatus,
+        List<(string Wt, GitStatus? Status)> worktrees,
+        Dictionary<string, PullRequestInfo> prs)
+    {
+        var lines = new List<IRenderable>
+        {
+            RenderRepoLine(entry, repoStatus, prs)
+        };
+        foreach (var (wt, status) in worktrees)
+            lines.Add(RenderWorktreeLine(entry, wt, status, prs));
+        return new Rows(lines);
+    }
+
+    static Markup RenderRepoLine(
+        string entry, GitStatus? status, Dictionary<string, PullRequestInfo> prs)
+    {
+        string statusMarkup = FormatGitStatus(status);
+        string prefix = $"[purple]{RepoId(entry)}[/] {Markup.Escape(entry)}{statusMarkup}";
+        return new Markup(AppendPrInfo(prefix, status?.Branch, prs));
+    }
+
+    static Markup RenderWorktreeLine(
+        string entry, string wt, GitStatus? status, Dictionary<string, PullRequestInfo> prs)
+    {
+        string wtStatus = FormatGitStatus(status);
+        string prefix = $"    [blue]{WorktreeId(entry, wt)}[/] {Markup.Escape(wt)}{wtStatus}";
+        return new Markup(AppendPrInfo(prefix, status?.Branch, prs));
+    }
+
+    static string AppendPrInfo(
         string prefixMarkup, string? branch, Dictionary<string, PullRequestInfo> prs)
     {
         if (branch is null || !prs.TryGetValue(branch, out PullRequestInfo? pr))
-        {
-            AnsiConsole.MarkupLine(prefixMarkup);
-            return;
-        }
+            return prefixMarkup;
 
         int width = AnsiConsole.Profile.Width;
         int prefixLen = Markup.Remove(prefixMarkup).Length;
@@ -453,21 +482,16 @@ public class WorktreeCommands
         int stateLen = Markup.Remove(stateMarkup).Length;
 
         // " [open] #42 " overhead
-        int overhead = 1 + stateLen + 1 + 1 + pr.Number.ToString().Length + 1; // space+state+space+hash+num+space
+        int overhead = 1 + stateLen + 1 + 1 + pr.Number.ToString().Length + 1;
         int availableForTitle = width - prefixLen - overhead;
 
         string title = pr.Title;
         if (availableForTitle <= 0)
-        {
             title = "";
-        }
         else if (title.Length > availableForTitle)
-        {
             title = string.Concat(title.AsSpan(0, availableForTitle - 1), "…");
-        }
 
-        AnsiConsole.MarkupLine(
-            $"{prefixMarkup} {stateMarkup} [cyan]#{pr.Number}[/] {Markup.Escape(title)}");
+        return $"{prefixMarkup} {stateMarkup} [cyan]#{pr.Number}[/] {Markup.Escape(title)}";
     }
 
     static string FormatPrState(string state) => state switch
@@ -634,9 +658,9 @@ record PullRequestInfo(int Number, string Title, string State);
 internal class CliWrapper(string command)
 {
     readonly PipeTarget _stdOutPipe =
-        PipeTarget.ToDelegate(line => AnsiConsole.MarkupLineInterpolated($"[dim][[stdout]] {line}[/]"));
+        PipeTarget.ToDelegate(line => AnsiConsole.Write(new Markup($"[dim][[stdout]] {Markup.Escape(line)}[/]\n")));
     readonly PipeTarget _stdErrPipe =
-        PipeTarget.ToDelegate(line => AnsiConsole.MarkupLineInterpolated($"[dim][[stderr]] {line}[/]"));
+        PipeTarget.ToDelegate(line => AnsiConsole.Write(new Markup($"[dim][[stderr]] {Markup.Escape(line)}[/]\n")));
 
     public async Task<BufferedCommandResult> RunAsync(
         string[] arguments,
@@ -655,7 +679,7 @@ internal class CliWrapper(string command)
         {
             cmd = cmd.WithStandardOutputPipe(_stdOutPipe).WithStandardErrorPipe(_stdErrPipe);
             string commandString = Markup.Escape($"{command} {string.Join(' ', arguments)}");
-            AnsiConsole.MarkupLineInterpolated($"[blue][[exec]] {commandString}[/]");
+            AnsiConsole.Write(new Markup($"[blue][[exec]] {commandString}[/]\n"));
         }
 
         return await cmd.ExecuteBufferedAsync(Encoding.UTF8, Encoding.UTF8, cancellationToken);
