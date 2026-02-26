@@ -29,6 +29,7 @@
 #:package Spectre.Console@*
 
 using System.Text;
+using System.Text.Json;
 using ConsoleAppFramework;
 using CliWrap;
 using CliWrap.Buffered;
@@ -124,14 +125,20 @@ public class WorktreeCommands
         }
 
         var statusTasks = items.ToDictionary(i => i, i => GetGitStatusAsync(i.Dir));
-        await Task.WhenAll(statusTasks.Values);
+        var prTasks = entries.ToDictionary(
+            e => e,
+            e => GetOpenPrsAsync(Path.Combine(Config.SrcRootPath, e)));
+        await Task.WhenAll(statusTasks.Values.Cast<Task>().Concat(prTasks.Values));
 
         // Display
         foreach (string entry in entries)
         {
+            var prs = prTasks[entry].Result;
+
             var repoKey = items.First(i => i.Entry == entry && i.Worktree is null);
             string statusMarkup = FormatGitStatus(statusTasks[repoKey].Result);
-            AnsiConsole.MarkupLine($"[purple]{RepoId(entry)}[/] {Markup.Escape(entry)}{statusMarkup}");
+            string prefix = $"[purple]{RepoId(entry)}[/] {Markup.Escape(entry)}{statusMarkup}";
+            WriteListLine(prefix, statusTasks[repoKey].Result?.Branch, prs);
 
             string worktreesDir = Path.Combine(Config.SrcRootPath, $"{entry}.worktrees");
             if (!Directory.Exists(worktreesDir))
@@ -142,7 +149,8 @@ public class WorktreeCommands
                 string wt = Path.GetFileName(dir);
                 var wtKey = items.First(i => i.Entry == entry && i.Worktree == wt);
                 string wtStatus = FormatGitStatus(statusTasks[wtKey].Result);
-                AnsiConsole.MarkupLine($"    [blue]{WorktreeId(entry, wt)}[/] {Markup.Escape(wt)}{wtStatus}");
+                string wtPrefix = $"    [blue]{WorktreeId(entry, wt)}[/] {Markup.Escape(wt)}{wtStatus}";
+                WriteListLine(wtPrefix, statusTasks[wtKey].Result?.Branch, prs);
             }
         }
     }
@@ -430,6 +438,78 @@ public class WorktreeCommands
         return new GitStatus(branch, ahead, behind, hasUpstream, additions, deletions, untrackedFiles);
     }
 
+    static void WriteListLine(
+        string prefixMarkup, string? branch, Dictionary<string, PullRequestInfo> prs)
+    {
+        if (branch is null || !prs.TryGetValue(branch, out PullRequestInfo? pr))
+        {
+            AnsiConsole.MarkupLine(prefixMarkup);
+            return;
+        }
+
+        int width = AnsiConsole.Profile.Width;
+        int prefixLen = Markup.Remove(prefixMarkup).Length;
+        string stateMarkup = FormatPrState(pr.State);
+        int stateLen = Markup.Remove(stateMarkup).Length;
+
+        // " [open] #42 " overhead
+        int overhead = 1 + stateLen + 1 + 1 + pr.Number.ToString().Length + 1; // space+state+space+hash+num+space
+        int availableForTitle = width - prefixLen - overhead;
+
+        string title = pr.Title;
+        if (availableForTitle <= 0)
+        {
+            title = "";
+        }
+        else if (title.Length > availableForTitle)
+        {
+            title = string.Concat(title.AsSpan(0, availableForTitle - 1), "…");
+        }
+
+        AnsiConsole.MarkupLine(
+            $"{prefixMarkup} {stateMarkup} [cyan]#{pr.Number}[/] {Markup.Escape(title)}");
+    }
+
+    static string FormatPrState(string state) => state switch
+    {
+        "OPEN" => "[green][[open]][/]",
+        "MERGED" => "[purple][[merged]][/]",
+        "CLOSED" => "[red][[closed]][/]",
+        _ => $"[dim][[{Markup.Escape(state.ToLowerInvariant())}]][/]",
+    };
+
+    static async Task<Dictionary<string, PullRequestInfo>> GetOpenPrsAsync(string workingDir)
+    {
+        var result = new Dictionary<string, PullRequestInfo>(StringComparer.Ordinal);
+
+        BufferedCommandResult ghResult = await Gh.RunAsync(
+            ["pr", "list", "--state", "all", "--json", "number,title,headRefName,state"],
+            workingDirectory: workingDir,
+            silent: true);
+
+        if (ghResult.ExitCode != 0)
+            return result;
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(ghResult.StandardOutput);
+            foreach (JsonElement pr in doc.RootElement.EnumerateArray())
+            {
+                string branch = pr.GetProperty("headRefName").GetString() ?? "";
+                int number = pr.GetProperty("number").GetInt32();
+                string title = pr.GetProperty("title").GetString() ?? "";
+                string state = pr.GetProperty("state").GetString() ?? "OPEN";
+                result.TryAdd(branch, new PullRequestInfo(number, title, state));
+            }
+        }
+        catch (JsonException)
+        {
+            // Graceful degradation: ignore malformed output
+        }
+
+        return result;
+    }
+
     static string FormatGitStatus(GitStatus? status)
     {
         if (status is null)
@@ -548,6 +628,8 @@ public class WorktreeCommands
 }
 
 record GitStatus(string Branch, int Ahead, int Behind, bool HasUpstream, int Additions, int Deletions, int UntrackedFiles);
+
+record PullRequestInfo(int Number, string Title, string State);
 
 internal class CliWrapper(string command)
 {
