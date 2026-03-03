@@ -6,8 +6,7 @@
 // Usage:
 //   wt add <repodir>              Register a repo for worktree management
 //   wt list                       List managed repos and their worktrees
-//   wt create <repo> <name>       Create a new worktree (--branch/-b, --from/-f)
-//   wt create <repo> --pr <num>   Create a worktree and check out a PR
+//   wt create                      Interactively create a new worktree
 //   wt remove <ref>               Remove a worktree or untrack a repo
 //   wt dir <ref>                  Print the path to a repo or worktree
 //
@@ -157,72 +156,152 @@ public class WorktreeCommands
         AnsiConsole.Write(new Rows(renderedRows));
     }
 
-    /// <summary>Create a new worktree for a managed repository.</summary>
-    /// <param name="repoReference">Repo name or repo ID.</param>
-    /// <param name="worktreeName">Name for the new worktree. Auto-generated when using --pr.</param>
-    /// <param name="createBranch">-b, Create a new branch matching the worktree name.</param>
-    /// <param name="baseRef">-f, Base ref for the new branch (requires --createBranch).</param>
-    /// <param name="pullRequestNumber">-p, PR number to check out in the new worktree.</param>
+    /// <summary>Create a new worktree for a managed repository (interactive).</summary>
     [Command("create|new|n")]
-    public async Task Create(
-        [Argument] string repoReference,
-        [Argument] string? worktreeName = null,
-        bool createBranch = false,
-        string? baseRef = null,
-        int? pullRequestNumber = null)
+    public async Task Create()
     {
-        if (baseRef is not null && !createBranch)
-        {
-            Console.Error.WriteLine("Error: --baseRef/-f requires --createBranch/-b.");
-            Environment.ExitCode = 1;
-            return;
-        }
-
-        if (pullRequestNumber is not null && (createBranch || baseRef is not null))
-        {
-            Console.Error.WriteLine("Error: --pullRequestNumber/-p cannot be combined with --createBranch/-b or --baseRef/-f.");
-            Environment.ExitCode = 1;
-            return;
-        }
-
-        if (worktreeName is null && pullRequestNumber is null)
-        {
-            Console.Error.WriteLine("Error: worktreeName is required unless --pullRequestNumber/-p is specified.");
-            Environment.ExitCode = 1;
-            return;
-        }
-
-        worktreeName ??= $"pr-{pullRequestNumber}";
-
         IReadOnlyList<Worktree> managedRepositories = ReadWorktreesFile();
 
-        string repositoryDirectory;
-        if (TryResolveRepositoryReference(repoReference, managedRepositories, out string resolvedDirectory))
-            repositoryDirectory = resolvedDirectory;
-        else
-            repositoryDirectory = repoReference;
-
-        if (!managedRepositories.Any(repository => repository.RepositoryDirectory == repositoryDirectory))
+        if (managedRepositories.Count == 0)
         {
-            AnsiConsole.Write(new Markup($"[red]Error:[/] Repository not managed: [dim]{Markup.Escape(repoReference)}[/]. Use 'add' first.\n"));
+            AnsiConsole.Write(new Markup("[yellow]No repositories registered.[/] Use 'add' to register one.\n"));
             Environment.ExitCode = 1;
             return;
         }
 
+        // Step 1: Select repository
+        string selectedRepo = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Which [purple]repository[/]?")
+                .UseConverter(Markup.Escape)
+                .AddChoices(managedRepositories.Select(r => $"{r.Id} {r.RepositoryDirectory}")));
+        string repositoryDirectory = selectedRepo[(selectedRepo.IndexOf(' ') + 1)..];
         var worktree = new Worktree(repositoryDirectory);
-        string worktreePath = Path.Combine(worktree.WorktreesDirectoryPath, worktreeName);
 
+        // Step 2: Choose mode
+        const string ModeExistingBranch = "From an existing branch";
+        const string ModePullRequest = "From a pull request";
+        const string ModeNewBranch = "Create a new branch";
+        string mode = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("What do you want to do?")
+                .AddChoices(ModeExistingBranch, ModePullRequest, ModeNewBranch));
+
+        string? branchOrRef = null;
+        string worktreeName;
+        bool createBranch = false;
+        int? pullRequestNumber = null;
+
+        if (mode == ModeExistingBranch)
+        {
+            // Step 3a: Select from recent local branches
+            BufferedCommandResult branchResult = await Git.RunAsync(
+                ["branch", "--sort=-committerdate", "--format=%(refname:short)"],
+                workingDirectory: worktree.FullPath,
+                silent: true);
+
+            var branches = branchResult.StandardOutput
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Take(10)
+                .ToList();
+
+            const string differentBranch = "A different branch";
+            branches.Add(differentBranch);
+
+            string selectedBranch = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("Which [blue]branch[/]?")
+                    .UseConverter(Markup.Escape)
+                    .AddChoices(branches));
+
+            branchOrRef = selectedBranch == differentBranch
+                ? AnsiConsole.Prompt(new TextPrompt<string>("Branch name:"))
+                : selectedBranch;
+
+            worktreeName = AnsiConsole.Prompt(
+                new TextPrompt<string>("Worktree name:")
+                    .DefaultValue(branchOrRef));
+        }
+        else if (mode == ModePullRequest)
+        {
+            // Step 3b: Select from open PRs
+            BufferedCommandResult prResult = await GitHubCli.RunAsync(
+                ["pr", "list", "--state", "open", "--json", "number,title,headRefName"],
+                workingDirectory: worktree.FullPath,
+                silent: true);
+
+            GitHubPullRequestDto[] prs;
+            try
+            {
+                prs = JsonSerializer.Deserialize(prResult.StandardOutput, GitHubJsonContext.Default.GitHubPullRequestDtoArray) ?? [];
+            }
+            catch (JsonException)
+            {
+                prs = [];
+            }
+
+            if (prs.Length == 0)
+            {
+                AnsiConsole.Write(new Markup("[yellow]No open pull requests found.[/]\n"));
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            var prChoices = prs.Select(pr => $"#{pr.Number} {pr.Title}").ToList();
+            string selectedPr = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("Which [green]pull request[/]?")
+                    .UseConverter(Markup.Escape)
+                    .AddChoices(prChoices));
+
+            var chosenPr = prs[prChoices.IndexOf(selectedPr)];
+            pullRequestNumber = chosenPr.Number;
+
+            worktreeName = AnsiConsole.Prompt(
+                new TextPrompt<string>("Worktree name:")
+                    .DefaultValue($"pr-{chosenPr.Number}"));
+        }
+        else
+        {
+            // Step 3c: New branch — select base ref
+            const string refHead = "HEAD (detached)";
+            const string refMain = "main";
+            const string refUpstreamMain = "upstream/main";
+            const string refUpstreamNightly = "upstream/nightly";
+            const string refOther = "Something else";
+
+            string selectedRef = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("Base the new branch off of:")
+                    .AddChoices(refHead, refMain, refUpstreamMain, refUpstreamNightly, refOther));
+
+            branchOrRef = selectedRef == refOther
+                ? AnsiConsole.Prompt(new TextPrompt<string>("Base ref:"))
+                : selectedRef == refHead ? "HEAD" : selectedRef;
+
+            worktreeName = AnsiConsole.Prompt(
+                new TextPrompt<string>("Worktree name:"));
+
+            createBranch = true;
+        }
+
+        // Step 4: Execute
+        string worktreePath = Path.Combine(worktree.WorktreesDirectoryPath, worktreeName);
         List<string> gitArguments = ["worktree", "add"];
 
         if (createBranch)
         {
             gitArguments.AddRange(["-b", worktreeName, worktreePath]);
-            if (baseRef is not null)
-                gitArguments.Add(baseRef);
+            if (branchOrRef is not null)
+                gitArguments.Add(branchOrRef);
+        }
+        else if (pullRequestNumber is not null)
+        {
+            gitArguments.AddRange(["--detach", worktreePath]);
         }
         else
         {
-            gitArguments.AddRange(["--detach", worktreePath]);
+            gitArguments.AddRange([worktreePath, branchOrRef!]);
         }
 
         BufferedCommandResult gitResult = await Git.RunAsync(
@@ -257,7 +336,7 @@ public class WorktreeCommands
                         return;
                     }
 
-                    AnsiConsole.Write(new Markup($"Created worktree: [blue]{worktree.ComputeWorktreeId(worktreeName)}[/] {Markup.Escape(worktreePath)}\n"));
+                    AnsiConsole.Write(new Markup($"Checked out PR: [blue]{worktree.ComputeWorktreeId(worktreeName)}[/] {Markup.Escape(worktreePath)}\n"));
                 }
                 else
                 {
