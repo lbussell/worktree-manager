@@ -67,7 +67,7 @@ _list-csv:
     #!/usr/bin/env bash
     prs=$(gh pr list --state all --json headRefName,number,state --limit 200 2>/dev/null || echo '[]')
     now=$(date +%s)
-    echo "Path,Branch,Age,Commit,Status,PR"
+    echo "Age,Path,Branch,Commit,Status,PR"
     {
     while IFS= read -r line; do
         path=$(echo "$line" | awk '{print $1}')
@@ -107,7 +107,7 @@ _list-csv:
         status="${ab} ${changes}"
         status=$(echo "$status" | xargs) # trim whitespace
 
-        echo "$epoch,${path/$HOME/~},$branch,$age,$commit,$status,$pr_info"
+        echo "$epoch,$age,${path/$HOME/~},$branch,$commit,$status,$pr_info"
     done < <(git worktree list)
     } | sort -t',' -k1 -rn | cut -d',' -f2-
 
@@ -151,7 +151,7 @@ _branches-tsv:
     done < <(git worktree list --porcelain)
 
     now=$(date +%s)
-    echo "Branch	Age	Tracking	Commit	Message	Worktree"
+    echo "Age	Branch	Tracking	Commit	Message	Worktree"
     git for-each-ref --sort=-committerdate --format='%(refname:short)|%(upstream:short)|%(upstream:track)|%(objectname:short)|%(committerdate:unix)|%(subject)' refs/heads/ \
     | while IFS='|' read -r branch upstream track commit epoch message; do
         # Normalize tracking info
@@ -184,5 +184,5 @@ _branches-tsv:
         # Truncate message to 40 chars
         [[ ${#message} -gt 40 ]] && message="${message:0:37}..."
 
-        printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$branch" "$age" "$tracking" "$commit" "$message" "$wt"
+        printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$age" "$branch" "$tracking" "$commit" "$message" "$wt"
     done
