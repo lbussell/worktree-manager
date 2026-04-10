@@ -13,3 +13,7 @@ status:
     @echo "  Root: $(git rev-parse --show-toplevel)"
     @echo "  Branch: $(git branch --show-current)"
     @echo "  Commit: $(git rev-parse --short HEAD)"
+
+# List open pull requests
+pr:
+    @gh pr list
