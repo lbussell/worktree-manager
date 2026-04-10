@@ -8,6 +8,10 @@ default:
 list:
     @{{ _self }} _list-csv | gum table -p
 
+# Choose a worktree and print its path
+choose:
+    @{{ _self }} _list-csv | gum table -r 1
+
 [private]
 _list-csv:
     #!/usr/bin/env bash
