@@ -13,7 +13,7 @@ list:
             commit=$(echo "$line" | awk '{print $2}')
             branch=$(echo "$line" | sed -n 's/.*\[\(.*\)\]/\1/p')
             pr_info=$(echo "$prs" | jq -r --arg b "$branch" '.[] | select(.headRefName == $b) | "#\(.number) (\(.state))"' | head -1)
-            echo "$path,$branch,$commit,$pr_info"
+            echo "${path/$HOME/~},$branch,$commit,$pr_info"
         done < <(git worktree list)
     } | gum table -p
 
@@ -33,6 +33,6 @@ pr:
         gh pr list --json number,title,headRefName --jq '.[] | [.number, .headRefName, .title] | @tsv' \
         | while IFS=$'\t' read -r number branch title; do
             wt=$(echo "$worktrees" | grep "\[$branch\]" | awk '{print $1}')
-            echo "#$number,$title,$wt"
+            echo "#$number,$title,${wt/$HOME/~}"
         done
     } | gum table -p
