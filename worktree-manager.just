@@ -8,9 +8,59 @@ default:
 list:
     @{{ _self }} _list-csv | gum table -p
 
-# Choose a worktree and print its path
+# Choose a worktree and perform an action
 choose:
-    @{{ _self }} _list-csv | gum table -r 1
+    #!/usr/bin/env bash
+    csv=$({{ _self }} _list-csv)
+    row=$(echo "$csv" | gum table)
+    [[ -z "$row" ]] && exit 0
+
+    echo "$row"
+
+    IFS=',' read -r path branch commit status pr_info <<< "$row"
+    # Expand ~ back to $HOME for commands
+    full_path="${path/#\~/$HOME}"
+    pr_number=$(echo "$pr_info" | grep -o '#[0-9]*' | tr -d '#')
+
+    echo "  Path:   $full_path"
+    echo "  Branch: $branch"
+    [[ -n "$pr_number" ]] && echo "  PR:     #$pr_number"
+
+    action=$(gum choose --height=6 \
+        "Print worktree path" \
+        "Open PR in browser" \
+        "Remove worktree" \
+        "Remove worktree and branch")
+    [[ -z "$action" ]] && exit 0
+
+    echo "→ $action"
+    case "$action" in
+        "Print worktree path")
+            echo "$full_path"
+            ;;
+        "Open PR in browser")
+            if [[ -n "$pr_number" ]]; then
+                gh pr view "$pr_number" --web
+            else
+                echo "No PR associated with branch $branch"
+            fi
+            ;;
+        "Remove worktree")
+            {{ _self }} _remove-worktree "$full_path"
+            ;;
+        "Remove worktree and branch")
+            {{ _self }} _remove-worktree-and-branch "$full_path" "$branch"
+            ;;
+    esac
+
+[private]
+_remove-worktree path:
+    git worktree remove "{{ path }}"
+
+[private]
+_remove-worktree-and-branch path branch:
+    git worktree remove "{{ path }}"
+    git branch -D "{{ branch }}"
 
 [private]
 _list-csv:
