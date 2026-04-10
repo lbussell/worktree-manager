@@ -10,18 +10,18 @@ help:
 
 # List all git worktrees with associated PR info
 list:
-    @{{ _self }} _list-csv | gum table -p
+    @{{ _self }} _list-tsv | gum table -s $'\t' --lazy-quotes -p
 
 # Choose a worktree and perform an action
 choose:
     #!/usr/bin/env bash
-    csv=$({{ _self }} _list-csv)
-    row=$(echo "$csv" | gum table)
+    csv=$({{ _self }} _list-tsv)
+    row=$(echo "$csv" | gum table -s $'\t' --lazy-quotes)
     [[ -z "$row" ]] && exit 0
 
     echo "$row"
 
-    IFS=',' read -r path branch commit status pr_info <<< "$row"
+    IFS=$'\t' read -r age path branch commit status pr_info <<< "$row"
     # Expand ~ back to $HOME for commands
     full_path="${path/#\~/$HOME}"
     pr_number=$(echo "$pr_info" | grep -o '#[0-9]*' | tr -d '#')
@@ -67,11 +67,11 @@ _remove-worktree-and-branch path branch:
     git branch -D "{{ branch }}"
 
 [private]
-_list-csv:
+_list-tsv:
     #!/usr/bin/env bash
     prs=$(gh pr list --state all --json headRefName,number,state --limit 200 2>/dev/null || echo '[]')
     now=$(date +%s)
-    echo "Age,Path,Branch,Commit,Status,PR"
+    printf "Age\tPath\tBranch\tCommit\tStatus\tPR\n"
     {
     while IFS= read -r line; do
         path=$(echo "$line" | awk '{print $1}')
@@ -111,9 +111,9 @@ _list-csv:
         status="${ab} ${changes}"
         status=$(echo "$status" | xargs) # trim whitespace
 
-        echo "$epoch,$age,${path/$HOME/~},$branch,$commit,$status,$pr_info"
+        printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$epoch,$age" "${path/$HOME/~}" "$branch" "$commit" "$status" "$pr_info"
     done < <(git worktree list)
-    } | sort -t',' -k1 -rn | cut -d',' -f2-
+    } | sort -t',' -k1 -rn | sed 's/^[^,]*,//'
 
 # Show worktree status summary
 status:
@@ -127,13 +127,13 @@ pr:
     #!/usr/bin/env bash
     worktrees=$(git worktree list)
     {
-        echo "PR,Title,Worktree"
+        printf "PR\tTitle\tWorktree\n"
         gh pr list --json number,title,headRefName --jq '.[] | [.number, .headRefName, .title] | @tsv' \
         | while IFS=$'\t' read -r number branch title; do
             wt=$(echo "$worktrees" | grep "\[$branch\]" | awk '{print $1}')
-            echo "#$number,$title,${wt/$HOME/~}"
+            printf "#%s\t%s\t%s\n" "$number" "$title" "${wt/$HOME/~}"
         done
-    } | gum table -p
+    } | gum table -s $'\t' --lazy-quotes -p
 
 # List recently merged pull requests
 merged:
