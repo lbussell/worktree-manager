@@ -3,5 +3,8 @@
 // SPDX-License-Identifier: MIT
 
 #:property TargetFramework=net10.0
+#:package Spectre.Console@0.*
 
-Console.WriteLine("Hello world");
+using Spectre.Console;
+
+AnsiConsole.MarkupLine("[bold green]Hello world[/]");
