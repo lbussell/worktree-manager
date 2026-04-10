@@ -66,12 +66,24 @@ _remove-worktree-and-branch path branch:
 _list-csv:
     #!/usr/bin/env bash
     prs=$(gh pr list --state all --json headRefName,number,state --limit 200 2>/dev/null || echo '[]')
-    echo "Path,Branch,Commit,Status,PR"
+    now=$(date +%s)
+    echo "Path,Branch,Age,Commit,Status,PR"
+    {
     while IFS= read -r line; do
         path=$(echo "$line" | awk '{print $1}')
         commit=$(echo "$line" | awk '{print $2}')
         branch=$(echo "$line" | sed -n 's/.*\[\(.*\)\]/\1/p')
         pr_info=$(echo "$prs" | jq -r --arg b "$branch" '.[] | select(.headRefName == $b) | "#\(.number) (\(.state))"' | head -1)
+
+        # Commit epoch and relative age
+        epoch=$(git -C "$path" log -1 --format='%ct' 2>/dev/null || echo "0")
+        diff=$((now - epoch))
+        if   (( diff >= 2592000 )); then age="$((diff / 2592000))M"
+        elif (( diff >= 604800 ));  then age="$((diff / 604800))w"
+        elif (( diff >= 86400 ));   then age="$((diff / 86400))d"
+        elif (( diff >= 3600 ));    then age="$((diff / 3600))h"
+        else                             age="$((diff / 60))m"
+        fi
 
         # Ahead/behind upstream
         ab=""
@@ -95,8 +107,9 @@ _list-csv:
         status="${ab} ${changes}"
         status=$(echo "$status" | xargs) # trim whitespace
 
-        echo "${path/$HOME/~},$branch,$commit,$status,$pr_info"
+        echo "$epoch,${path/$HOME/~},$branch,$age,$commit,$status,$pr_info"
     done < <(git worktree list)
+    } | sort -t',' -k1 -rn | cut -d',' -f2-
 
 # Show worktree status summary
 status:
@@ -117,3 +130,59 @@ pr:
             echo "#$number,$title,${wt/$HOME/~}"
         done
     } | gum table -p
+
+# List all local branches with upstream, tracking status, and worktree info
+branches:
+    @{{ _self }} _branches-tsv | gum table -s $'\t' --lazy-quotes -p
+
+[private]
+_branches-tsv:
+    #!/usr/bin/env bash
+    # Build worktree lookup as "branch|path" lines
+    wt_lookup=""
+    while IFS= read -r line; do
+        case "$line" in
+            worktree\ *) wt_path="${line#worktree }" ;;
+            branch\ *)
+                b="${line#branch refs/heads/}"
+                wt_lookup+="$b|$wt_path"$'\n'
+                ;;
+        esac
+    done < <(git worktree list --porcelain)
+
+    now=$(date +%s)
+    echo "Branch	Age	Tracking	Commit	Message	Worktree"
+    git for-each-ref --sort=-committerdate --format='%(refname:short)|%(upstream:short)|%(upstream:track)|%(objectname:short)|%(committerdate:unix)|%(subject)' refs/heads/ \
+    | while IFS='|' read -r branch upstream track commit epoch message; do
+        # Normalize tracking info
+        if [[ "$track" == "[gone]" ]]; then
+            tracking="missing"
+        elif [[ -n "$track" ]]; then
+            # Parse [ahead N, behind M] into ↑N↓M format
+            tracking=""
+            ahead=$(echo "$track" | grep -o 'ahead [0-9]*' | grep -o '[0-9]*')
+            behind=$(echo "$track" | grep -o 'behind [0-9]*' | grep -o '[0-9]*')
+            [[ -n "$ahead" ]] && tracking+="↑${ahead}"
+            [[ -n "$behind" ]] && tracking+="↓${behind}"
+        else
+            tracking="✓"
+        fi
+        [[ -z "$upstream" ]] && tracking=""
+
+        # Relative age
+        diff=$((now - epoch))
+        if   (( diff >= 2592000 )); then age="$((diff / 2592000))M"
+        elif (( diff >= 604800 ));  then age="$((diff / 604800))w"
+        elif (( diff >= 86400 ));   then age="$((diff / 86400))d"
+        elif (( diff >= 3600 ));    then age="$((diff / 3600))h"
+        else                             age="$((diff / 60))m"
+        fi
+
+        wt=$(echo "$wt_lookup" | grep "^${branch}|" | head -1 | cut -d'|' -f2)
+        wt="${wt/$HOME/~}"
+
+        # Truncate message to 40 chars
+        [[ ${#message} -gt 40 ]] && message="${message:0:37}..."
+
+        printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$branch" "$age" "$tracking" "$commit" "$message" "$wt"
+    done
