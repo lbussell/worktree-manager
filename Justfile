@@ -1,5 +1,9 @@
 set dotenv-load := false
 
+[private]
+default:
+    @just --list
+
 app := "WorktreeManager"
 install_dir := env("HOME") / ".local/bin"
 
