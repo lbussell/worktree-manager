@@ -4,6 +4,10 @@ _self := "just -f " + source_file() + " --working-directory \"$(pwd)\""
 default:
     @{{ _self }} "$({{ _self }} --summary | tr ' ' '\n' | grep -v '^default$' | gum choose)"
 
+# Show available recipes
+help:
+    @{{ _self }} --list
+
 # List all git worktrees with associated PR info
 list:
     @{{ _self }} _list-csv | gum table -p
@@ -130,6 +134,48 @@ pr:
             echo "#$number,$title,${wt/$HOME/~}"
         done
     } | gum table -p
+
+# List recently merged pull requests
+merged:
+    #!/usr/bin/env bash
+    now=$(date +%s)
+    data=$(
+        printf "Age\tPR\tTitle\tBranch\n"
+        gh pr list --state merged --json number,title,headRefName,mergedAt --limit 20 \
+            --jq '.[] | [.mergedAt, .number, .headRefName, .title] | @tsv' \
+        | while IFS=$'\t' read -r merged_at number branch title; do
+            epoch=$(TZ=UTC date -jf "%Y-%m-%dT%H:%M:%SZ" "$merged_at" +%s 2>/dev/null || date -d "$merged_at" +%s 2>/dev/null)
+            diff=$((now - epoch))
+            if   (( diff >= 2592000 )); then age="$((diff / 2592000))M"
+            elif (( diff >= 604800 ));  then age="$((diff / 604800))w"
+            elif (( diff >= 86400 ));   then age="$((diff / 86400))d"
+            elif (( diff >= 3600 ));    then age="$((diff / 3600))h"
+            else                             age="$((diff / 60))m"
+            fi
+            printf "%s\t#%s\t%s\t%s\n" "$age" "$number" "$title" "$branch"
+        done
+    )
+    row=$(echo "$data" | gum table -s $'\t' --lazy-quotes)
+    [[ -z "$row" ]] && exit 0
+
+    echo "$row"
+    pr_number=$(echo "$row" | grep -o '#[0-9]*' | head -1 | tr -d '#')
+
+    action=$(gum choose --height=4 \
+        "Open in browser" \
+        "Copy link to clipboard")
+    [[ -z "$action" ]] && exit 0
+
+    case "$action" in
+        "Open in browser")
+            gh pr view "$pr_number" --web
+            ;;
+        "Copy link to clipboard")
+            url=$(gh pr view "$pr_number" --json url --jq '.url')
+            echo "$url" | pbcopy
+            echo "Copied: $url"
+            ;;
+    esac
 
 # List all local branches with upstream, tracking status, and worktree info
 branches:
