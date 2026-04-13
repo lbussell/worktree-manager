@@ -38,7 +38,39 @@ show-worktree path:
     pr_info=$(gh pr list --head "$branch" --json number,title,state \
         --jq '.[] | "#\(.number) \(.title) (\(.state))"' 2>/dev/null | head -1)
     [[ -n "$pr_info" && "$pr_info" != "null" ]] && echo "PR:     $pr_info"
-    exit 0
+
+    action=$(gum choose --height=8 \
+        "Copy path" \
+        "Copy branch" \
+        "Open in VS Code" \
+        "Open in file browser" \
+        "Remove worktree (keep branch)" \
+        "Remove worktree (delete branch)")
+    [[ -z "$action" ]] && exit 0
+
+    case "$action" in
+        "Copy path")
+            echo "$path" | pbcopy
+            echo "Copied: $path"
+            ;;
+        "Copy branch")
+            echo "$branch" | pbcopy
+            echo "Copied: $branch"
+            ;;
+        "Open in VS Code")
+            code "$path"
+            ;;
+        "Open in file browser")
+            open "$path"
+            ;;
+        "Remove worktree (keep branch)")
+            {{ _self }} remove-worktree "$path"
+            ;;
+        "Remove worktree (delete branch)")
+            {{ _self }} remove-worktree "$path"
+            git branch -D "$branch"
+            ;;
+    esac
 
 # Show details for a branch
 show-branch branch:
@@ -129,3 +161,17 @@ list-prs:
     [[ -z "$selection" ]] && exit 0
     pr_number=$(echo "$selection" | grep -o '#[0-9]*' | head -1 | tr -d '#')
     {{ _self }} show-pr "$pr_number"
+
+# Remove a worktree, offering --force if dirty or locked
+remove-worktree path:
+    #!/usr/bin/env bash
+    path="{{ path }}"
+    if git worktree remove "$path" 2>/dev/null; then
+        echo "Removed: $path"
+    else
+        echo "Failed to remove worktree (dirty or locked)."
+        if gum confirm "Retry with --force?"; then
+            git worktree remove --force "$path"
+            echo "Removed (forced): $path"
+        fi
+    fi
