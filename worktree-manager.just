@@ -8,9 +8,8 @@ default:
 help:
     @{{ _self }} --list
 
-# Show worktree status summary
 status:
-    @echo "🔍 Worktree status:"
+    @echo "🔍 Git status:"
     @echo "  Root: $(git rev-parse --show-toplevel)"
     @echo "  Branch: $(git branch --show-current)"
     @echo "  Commit: $(git rev-parse --short HEAD)"
