@@ -4,7 +4,12 @@ _self := "just -f " + source_file() + " --working-directory \"$(pwd)\""
 default:
     #!/usr/bin/env bash
     git rev-parse --git-dir &>/dev/null && {{ _self }} status
-    choice=$({{ _self }} --summary | tr ' ' '\n' | grep -v '^default$' | gum choose)
+    choice=$(gum choose \
+        "new" \
+        "list-worktrees" \
+        "list-branches" \
+        "list-prs" \
+        "help")
     [[ -z "$choice" ]] && exit 0
     {{ _self }} "$choice"
 
@@ -169,11 +174,21 @@ show-pr number:
     echo "Branch: $branch"
     echo "Diff:   +${adds} -${dels}"
 
-    action=$(gum choose --height=6 \
-        "Open in browser" \
-        "Copy link" \
-        "Copy link (md)" \
-        "Copy branch")
+    # Check if branch has a worktree
+    wt=$(git worktree list --porcelain | awk -v b="refs/heads/$branch" '
+        /^worktree / { path=substr($0, 10) }
+        $0 == "branch " b { print path }
+    ')
+    [[ -n "$wt" ]] && echo "Worktree: $wt"
+
+    options=("Open in browser" "Copy link" "Copy link (md)" "Copy branch" "Switch to branch" "Checkout PR")
+    if [[ -n "$wt" ]]; then
+        options+=("Show worktree")
+    else
+        options+=("Checkout PR to worktree")
+    fi
+
+    action=$(printf '%s\n' "${options[@]}" | gum choose)
     [[ -z "$action" ]] && exit 0
 
     case "$action" in
@@ -192,6 +207,24 @@ show-pr number:
         "Copy branch")
             echo "$branch" | pbcopy
             echo "Copied: $branch"
+            ;;
+        "Switch to branch")
+            git switch "$branch"
+            ;;
+        "Checkout PR")
+            if ! gh pr checkout "$number" 2>/dev/null; then
+                echo "Checkout failed."
+                if gum confirm "Retry with --force?"; then
+                    gh pr checkout "$number" --force
+                fi
+            fi
+            ;;
+        "Show worktree")
+            {{ _self }} show-worktree "$wt"
+            ;;
+        "Checkout PR to worktree")
+            wt_path=$({{ _self }} _create-worktree "$branch")
+            [[ -n "$wt_path" ]] && {{ _self }} show-worktree "$wt_path"
             ;;
     esac
 
@@ -256,7 +289,21 @@ _choose-base-branch:
 
 [private]
 _choose-branch:
-    @git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ | gum filter
+    #!/usr/bin/env bash
+    remotes=$(git remote)
+    options=("local")
+    while IFS= read -r r; do
+        [[ -n "$r" ]] && options+=("$r")
+    done <<< "$remotes"
+
+    scope=$(printf '%s\n' "${options[@]}" | gum choose --header="Branch scope:")
+    [[ -z "$scope" ]] && exit 0
+
+    if [[ "$scope" == "local" ]]; then
+        git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ | gum filter
+    else
+        git for-each-ref --sort=-committerdate --format='%(refname:short)' "refs/remotes/$scope/" | gum filter
+    fi
 
 [private]
 _create-branch:
