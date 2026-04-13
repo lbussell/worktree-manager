@@ -2,17 +2,20 @@ _self := "just -f " + source_file() + " --working-directory \"$(pwd)\""
 
 [private]
 default:
-    @{{ _self }} "$({{ _self }} --summary | tr ' ' '\n' | grep -v '^default$' | gum choose)"
+    #!/usr/bin/env bash
+    git rev-parse --git-dir &>/dev/null && {{ _self }} status
+    choice=$({{ _self }} --summary | tr ' ' '\n' | grep -v '^default$' | gum choose)
+    [[ -z "$choice" ]] && exit 0
+    {{ _self }} "$choice"
 
 # Show available recipes
 help:
     @{{ _self }} --list
 
 status:
-    @echo "🔍 Git status:"
-    @echo "  Root: $(git rev-parse --show-toplevel)"
-    @echo "  Branch: $(git branch --show-current)"
-    @echo "  Commit: $(git rev-parse --short HEAD)"
+    @echo "Root: $(git rev-parse --show-toplevel)"
+    @echo "Branch: $(git branch --show-current)"
+    @echo "Commit: $(git rev-parse --short HEAD)"
 
 # Show details for a worktree
 show-worktree path:
@@ -89,7 +92,46 @@ show-branch branch:
         $0 == "branch " b { print path }
     ')
     [[ -n "$wt" ]] && echo "Worktree: $wt"
-    exit 0
+
+    pr_number=$(gh pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)
+    [[ "$pr_number" == "null" ]] && pr_number=""
+
+    action=$(gum choose --height=7 \
+        "Copy branch" \
+        "Switch to branch" \
+        "Show worktree" \
+        "Show PR" \
+        "Delete branch")
+    [[ -z "$action" ]] && exit 0
+
+    case "$action" in
+        "Copy branch")
+            echo "$branch" | pbcopy
+            echo "Copied: $branch"
+            ;;
+        "Switch to branch")
+            git switch "$branch"
+            ;;
+        "Show worktree")
+            if [[ -n "$wt" ]]; then
+                {{ _self }} show-worktree "$wt"
+            else
+                echo "No worktree for branch $branch"
+            fi
+            ;;
+        "Show PR")
+            if [[ -n "$pr_number" ]]; then
+                {{ _self }} show-pr "$pr_number"
+            else
+                echo "No open PR for branch $branch"
+            fi
+            ;;
+        "Delete branch")
+            if gum confirm "Delete branch $branch?"; then
+                git branch -D "$branch"
+            fi
+            ;;
+    esac
 
 # Show details for a pull request
 show-pr number:
