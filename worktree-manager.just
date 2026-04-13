@@ -17,6 +17,21 @@ status:
     @echo "Branch: $(git branch --show-current)"
     @echo "Commit: $(git rev-parse --short HEAD)"
 
+# Create a new branch (and optionally a worktree)
+new:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    branch=$({{ _self }} _create-branch)
+    [[ -z "$branch" ]] && exit 0
+
+    if gum confirm "Create worktree?"; then
+        wt_path=$({{ _self }} _create-worktree "$branch")
+        [[ -n "$wt_path" ]] && {{ _self }} show-worktree "$wt_path"
+    else
+        {{ _self }} show-branch "$branch"
+    fi
+
 # Show details for a worktree
 show-worktree path:
     #!/usr/bin/env bash
@@ -190,7 +205,7 @@ list-worktrees:
 # List branches and show details for the selected one
 list-branches:
     #!/usr/bin/env bash
-    selection=$(git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ | gum filter)
+    selection=$({{ _self }} _choose-branch)
     [[ -z "$selection" ]] && exit 0
     {{ _self }} show-branch "$selection"
 
@@ -215,3 +230,61 @@ remove-worktree path:
             echo "Removed (forced): $path"
         fi
     fi
+
+[private]
+_choose-base-branch:
+    #!/usr/bin/env bash
+    choice=$(gum choose --header="Base branch:" \
+        "Current branch" \
+        "upstream/main" \
+        "upstream/nightly" \
+        "Other")
+    [[ -z "$choice" ]] && exit 0
+
+    case "$choice" in
+        "Current branch")
+            git branch --show-current
+            ;;
+        upstream/*)
+            git fetch upstream >&2
+            echo "$choice"
+            ;;
+        "Other")
+            {{ _self }} _choose-branch
+            ;;
+    esac
+
+[private]
+_choose-branch:
+    @git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ | gum filter
+
+[private]
+_create-branch:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    base=$({{ _self }} _choose-base-branch)
+    [[ -z "$base" ]] && exit 0
+
+    branch_name=$(gum input --header="Branch name:")
+    [[ -z "$branch_name" ]] && exit 0
+
+    if gum confirm "Use prefix dev/loganbussell/?"; then
+        full_branch="dev/loganbussell/$branch_name"
+    else
+        full_branch="$branch_name"
+    fi
+
+    git branch "$full_branch" "$base" >&2
+    echo >&2 "Created branch $full_branch from $base"
+    echo "$full_branch"
+
+[private]
+_create-worktree branch:
+    #!/usr/bin/env bash
+    branch="{{ branch }}"
+    dir_name="${branch#dev/loganbussell/}"
+    repo_name=$(basename "$(git rev-parse --show-toplevel)")
+    wt_path="$HOME/w/$repo_name/$dir_name"
+    git worktree add "$wt_path" "$branch" >&2
+    echo "$wt_path"
