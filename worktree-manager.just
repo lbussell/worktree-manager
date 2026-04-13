@@ -9,9 +9,9 @@ default:
         "list-worktrees" \
         "list-branches" \
         "list-prs" \
-        "help")
+        "help") || exit 0
     [[ -z "$choice" ]] && exit 0
-    {{ _self }} "$choice"
+    {{ _self }} "$choice" || exit 0
 
 # Show available recipes
 help:
@@ -25,13 +25,12 @@ status:
 # Create a new branch (and optionally a worktree)
 new:
     #!/usr/bin/env bash
-    set -euo pipefail
 
-    branch=$({{ _self }} _create-branch)
+    branch=$({{ _self }} _create-branch) || exit 0
     [[ -z "$branch" ]] && exit 0
 
     if gum confirm "Create worktree?"; then
-        wt_path=$({{ _self }} _create-worktree "$branch")
+        wt_path=$({{ _self }} _create-worktree "$branch") || exit 0
         [[ -n "$wt_path" ]] && {{ _self }} show-worktree "$wt_path"
     else
         {{ _self }} show-branch "$branch"
@@ -231,21 +230,21 @@ show-pr number:
 # List worktrees and show details for the selected one
 list-worktrees:
     #!/usr/bin/env bash
-    selection=$(git worktree list | awk '{print $1}' | gum filter)
+    selection=$(git worktree list | awk '{print $1}' | gum filter) || exit 0
     [[ -z "$selection" ]] && exit 0
     {{ _self }} show-worktree "$selection"
 
 # List branches and show details for the selected one
 list-branches:
     #!/usr/bin/env bash
-    selection=$({{ _self }} _choose-branch)
+    selection=$({{ _self }} _choose-branch) || exit 0
     [[ -z "$selection" ]] && exit 0
     {{ _self }} show-branch "$selection"
 
 # List open PRs and show details for the selected one
 list-prs:
     #!/usr/bin/env bash
-    selection=$(gh pr list --json number,title --jq '.[] | "#\(.number) \(.title)"' | gum filter)
+    selection=$(gh pr list --json number,title --jq '.[] | "#\(.number) \(.title)"' | gum filter) || exit 0
     [[ -z "$selection" ]] && exit 0
     pr_number=$(echo "$selection" | grep -o '#[0-9]*' | head -1 | tr -d '#')
     {{ _self }} show-pr "$pr_number"
@@ -271,7 +270,7 @@ _choose-base-branch:
         "Current branch" \
         "upstream/main" \
         "upstream/nightly" \
-        "Other")
+        "Other") || exit 0
     [[ -z "$choice" ]] && exit 0
 
     case "$choice" in
@@ -283,7 +282,7 @@ _choose-base-branch:
             echo "$choice"
             ;;
         "Other")
-            {{ _self }} _choose-branch
+            {{ _self }} _choose-branch || exit 0
             ;;
     esac
 
@@ -296,24 +295,24 @@ _choose-branch:
         [[ -n "$r" ]] && options+=("$r")
     done <<< "$remotes"
 
-    scope=$(printf '%s\n' "${options[@]}" | gum choose --header="Branch scope:")
+    scope=$(printf '%s\n' "${options[@]}" | gum choose --header="Branch scope:") || exit 0
     [[ -z "$scope" ]] && exit 0
 
     if [[ "$scope" == "local" ]]; then
-        git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ | gum filter
+        result=$(git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ | gum filter) || exit 0
     else
-        git for-each-ref --sort=-committerdate --format='%(refname:short)' "refs/remotes/$scope/" | gum filter
+        result=$(git for-each-ref --sort=-committerdate --format='%(refname:short)' "refs/remotes/$scope/" | gum filter) || exit 0
     fi
+    echo "$result"
 
 [private]
 _create-branch:
     #!/usr/bin/env bash
-    set -euo pipefail
 
-    base=$({{ _self }} _choose-base-branch)
+    base=$({{ _self }} _choose-base-branch) || exit 0
     [[ -z "$base" ]] && exit 0
 
-    branch_name=$(gum input --header="Branch name:")
+    branch_name=$(gum input --header="Branch name:") || exit 0
     [[ -z "$branch_name" ]] && exit 0
 
     if gum confirm "Use prefix dev/loganbussell/?"; then
