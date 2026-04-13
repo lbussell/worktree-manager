@@ -95,13 +95,15 @@ show-branch branch:
 
     pr_number=$(gh pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)
     [[ "$pr_number" == "null" ]] && pr_number=""
+    [[ -n "$pr_number" ]] && echo "PR:       #$pr_number"
 
-    action=$(gum choose --height=7 \
-        "Copy branch" \
-        "Switch to branch" \
-        "Show worktree" \
-        "Show PR" \
-        "Delete branch")
+    options=("Copy branch" "Switch to branch")
+    [[ -n "$upstream" ]] && options+=("Open remote branch in browser")
+    [[ -n "$wt" ]] && options+=("Show worktree")
+    [[ -n "$pr_number" ]] && options+=("Show PR")
+    options+=("Delete branch")
+
+    action=$(printf '%s\n' "${options[@]}" | gum choose)
     [[ -z "$action" ]] && exit 0
 
     case "$action" in
@@ -112,19 +114,16 @@ show-branch branch:
         "Switch to branch")
             git switch "$branch"
             ;;
+        "Open remote branch in browser")
+            remote=$(echo "$upstream" | cut -d'/' -f1)
+            remote_url=$(git remote get-url "$remote" 2>/dev/null)
+            gh browse --branch "$branch" -R "$remote_url"
+            ;;
         "Show worktree")
-            if [[ -n "$wt" ]]; then
-                {{ _self }} show-worktree "$wt"
-            else
-                echo "No worktree for branch $branch"
-            fi
+            {{ _self }} show-worktree "$wt"
             ;;
         "Show PR")
-            if [[ -n "$pr_number" ]]; then
-                {{ _self }} show-pr "$pr_number"
-            else
-                echo "No open PR for branch $branch"
-            fi
+            {{ _self }} show-pr "$pr_number"
             ;;
         "Delete branch")
             if gum confirm "Delete branch $branch?"; then
