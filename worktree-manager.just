@@ -62,7 +62,51 @@ show-branch branch:
 
 # Show details for a pull request
 show-pr number:
-    gh pr view {{ number }}
+    #!/usr/bin/env bash
+    data=$(gh pr view {{ number }} --json number,title,state,author,headRefName,url,additions,deletions,repository)
+
+    number=$(echo "$data" | jq -r '.number')
+    title=$(echo "$data" | jq -r '.title')
+    repo=$(echo "$data" | jq -r '"\(.repository.owner.login)/\(.repository.name)"')
+    title=$(echo "$data" | jq -r '.title')
+    state=$(echo "$data" | jq -r '.state')
+    author=$(echo "$data" | jq -r '.author.login')
+    branch=$(echo "$data" | jq -r '.headRefName')
+    url=$(echo "$data" | jq -r '.url')
+    adds=$(echo "$data" | jq -r '.additions')
+    dels=$(echo "$data" | jq -r '.deletions')
+
+    echo "PR:     #${number} ${title}"
+    echo "State:  $state"
+    echo "Author: $author"
+    echo "Branch: $branch"
+    echo "Diff:   +${adds} -${dels}"
+
+    action=$(gum choose --height=6 \
+        "Open in browser" \
+        "Copy link" \
+        "Copy link (md)" \
+        "Copy branch")
+    [[ -z "$action" ]] && exit 0
+
+    case "$action" in
+        "Open in browser")
+            open "$url"
+            ;;
+        "Copy link")
+            echo "$url" | pbcopy
+            echo "Copied: $url"
+            ;;
+        "Copy link (md)")
+            md="${title} (${repo}#${number})"
+            echo "$md" | pbcopy
+            echo "Copied: $md"
+            ;;
+        "Copy branch")
+            echo "$branch" | pbcopy
+            echo "Copied: $branch"
+            ;;
+    esac
 
 # List worktrees and show details for the selected one
 list-worktrees:
