@@ -66,6 +66,8 @@ static async Task<Result<string[]>> GetGitBranches(string workingDirectory)
     }
 }
 
+#region Result<T>
+
 public abstract record Result<T>
 {
     public sealed record Ok(T Value) : Result<T>;
@@ -73,77 +75,85 @@ public abstract record Result<T>
 
     public static Result<T> Success(T value) => new Ok(value);
     public static Result<T> Failure(string message) => new Error(message);
-
-    public Result<U> Map<U>(Func<T, U> f) => this switch
-    {
-        Ok(var v) => Result<U>.Success(f(v)),
-        Error(var msg) => Result<U>.Failure(msg),
-        _ => throw new InvalidOperationException()
-    };
-
-    public Result<U> Bind<U>(Func<T, Result<U>> f) => this switch
-    {
-        Ok(var v) => f(v),
-        Error(var msg) => Result<U>.Failure(msg),
-        _ => throw new InvalidOperationException()
-    };
-
-    public T Unwrap() => this switch
-    {
-        Ok(var v) => v,
-        Error(var msg) => throw new InvalidOperationException($"Unwrap called on Error: {msg}"),
-        _ => throw new InvalidOperationException()
-    };
-
-    public T UnwrapOr(T fallback) => this switch
-    {
-        Ok(var v) => v,
-        _ => fallback
-    };
-
-    public void Match(Action<T> onOk, Action<string> onError)
-    {
-        switch (this)
-        {
-            case Ok(var v): onOk(v); break;
-            case Error(var msg): onError(msg); break;
-        }
-    }
-
-    public async Task<Result<U>> BindAsync<U>(Func<T, Task<Result<U>>> f) => this switch
-    {
-        Ok(var v) => await f(v),
-        Error(var msg) => Result<U>.Failure(msg),
-        _ => throw new InvalidOperationException()
-    };
-
-    public bool IsOk => this is Ok;
-    public bool IsError => this is Error;
 }
 
 public static class ResultExtensions
 {
-    public static async Task<Result<U>> Bind<T, U>(this Task<Result<T>> task, Func<T, Result<U>> f)
+    extension<T>(Result<T> result)
     {
-        var result = await task;
-        return result.Bind(f);
+        public bool IsOk => result is Result<T>.Ok;
+        public bool IsError => result is Result<T>.Error;
+
+        public Result<U> Map<U>(Func<T, U> f) => result switch
+        {
+            Result<T>.Ok(var v) => Result<U>.Success(f(v)),
+            Result<T>.Error(var msg) => Result<U>.Failure(msg),
+            _ => throw new InvalidOperationException()
+        };
+
+        public Result<U> Bind<U>(Func<T, Result<U>> f) => result switch
+        {
+            Result<T>.Ok(var v) => f(v),
+            Result<T>.Error(var msg) => Result<U>.Failure(msg),
+            _ => throw new InvalidOperationException()
+        };
+
+        public async Task<Result<U>> BindAsync<U>(Func<T, Task<Result<U>>> f) => result switch
+        {
+            Result<T>.Ok(var v) => await f(v),
+            Result<T>.Error(var msg) => Result<U>.Failure(msg),
+            _ => throw new InvalidOperationException()
+        };
+
+        public T Unwrap() => result switch
+        {
+            Result<T>.Ok(var v) => v,
+            Result<T>.Error(var msg) => throw new InvalidOperationException($"Unwrap called on Error: {msg}"),
+            _ => throw new InvalidOperationException()
+        };
+
+        public T UnwrapOr(T fallback) => result switch
+        {
+            Result<T>.Ok(var v) => v,
+            _ => fallback
+        };
+
+        public void Match(Action<T> onOk, Action<string> onError)
+        {
+            switch (result)
+            {
+                case Result<T>.Ok(var v): onOk(v); break;
+                case Result<T>.Error(var msg): onError(msg); break;
+            }
+        }
     }
 
-    public static async Task<Result<U>> Bind<T, U>(this Task<Result<T>> task, Func<T, Task<Result<U>>> f)
+    extension<T>(Task<Result<T>> task)
     {
-        var result = await task;
-        return await result.BindAsync(f);
-    }
+        public async Task<Result<U>> Bind<U>(Func<T, Result<U>> f)
+        {
+            var r = await task;
+            return r.Bind(f);
+        }
 
-    public static async Task<Result<U>> Map<T, U>(this Task<Result<T>> task, Func<T, U> f)
-    {
-        var result = await task;
-        return result.Map(f);
-    }
+        public async Task<Result<U>> Bind<U>(Func<T, Task<Result<U>>> f)
+        {
+            var r = await task;
+            return await r.BindAsync(f);
+        }
 
-    public static async Task Match<T>(this Task<Result<T>> task, Action<T> onOk, Action<string> onError)
-    {
-        var result = await task;
-        result.Match(onOk, onError);
+        public async Task<Result<U>> Map<U>(Func<T, U> f)
+        {
+            var r = await task;
+            return r.Map(f);
+        }
+
+        public async Task Match(Action<T> onOk, Action<string> onError)
+        {
+            var r = await task;
+            r.Match(onOk, onError);
+        }
     }
 }
+
+#endregion
