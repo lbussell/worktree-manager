@@ -25,23 +25,13 @@ static void PrintError(string message)
     Console.WriteLine($"Error: {message}");
 }
 
-static async Task<Result<string>> GetWorkingDirectory()
+static Task<Result<string>> GetWorkingDirectory()
 {
-    try
-    {
-        var result = await Cli.Wrap("git")
-            .WithArguments(["rev-parse", "--show-toplevel"])
-            .ExecuteBufferedAsync();
-
-        var dir = result.StandardOutput.Trim();
-        return string.IsNullOrEmpty(dir)
-            ? Result<string>.Failure("Not in a git repository")
-            : Result<string>.Success(dir);
-    }
-    catch (Exception ex)
-    {
-        return Result<string>.Failure(ex.Message);
-    }
+    var dir = Directory.GetCurrentDirectory();
+    var result = string.IsNullOrEmpty(dir)
+        ? Result<string>.Failure("Could not determine working directory")
+        : Result<string>.Success(dir);
+    return Task.FromResult(result);
 }
 
 static async Task<Result<string[]>> GetGitBranches(string workingDirectory)
