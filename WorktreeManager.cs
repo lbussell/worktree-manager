@@ -13,8 +13,8 @@ using Spectre.Console;
 AnsiConsole.WriteLine();
 
 MenuOption[] menuOptions = [
-    new("Branches", BrowseBranches),
-    new("Worktrees", BrowseWorktrees),
+    new("Branches", ChooseBranch),
+    new("Worktrees", ChooseWorktree),
     new("Exit", () => Task.FromResult(Result<string>.Success("Exiting"))),
 ];
 
@@ -22,13 +22,13 @@ await Choose(menuOptions, o => o.Name)
     .BindAsync(option => option.Action())
     .Match(PrintOk, PrintError);
 
-static async Task<Result<string>> BrowseBranches() =>
+static async Task<Result<string>> ChooseBranch() =>
     await GetWorkingDirectory()
         .BindAsync(GetGitBranches)
         .Bind(branches => Choose(branches, FormatBranchSpectreConsole, "Select a branch:"))
         .Map(branch => branch.Name);
 
-static async Task<Result<string>> BrowseWorktrees() =>
+static async Task<Result<string>> ChooseWorktree() =>
     await GetWorkingDirectory()
         .BindAsync(GetGitWorktrees)
         .Bind(worktrees => Choose(worktrees, FormatWorktree, "Select a worktree:"))
