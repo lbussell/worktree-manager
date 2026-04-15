@@ -6,7 +6,66 @@
 #:package Spectre.Console@0.*
 #:package CliWrap@3.*
 
-Console.WriteLine("Hello world!");
+using CliWrap;
+using CliWrap.Buffered;
+
+var result = GetWorkingDirectory()
+    .Bind(GetGitBranches);
+
+switch (result)
+{
+    case Result<string[]>.Ok(var branches):
+        Console.WriteLine("Branches:");
+        foreach (var branch in branches)
+            Console.WriteLine($"  {branch}");
+        break;
+    case Result<string[]>.Error(var msg):
+        Console.WriteLine($"Error: {msg}");
+        break;
+}
+
+static Result<string> GetWorkingDirectory()
+{
+    try
+    {
+        var result = Cli.Wrap("git")
+            .WithArguments(["rev-parse", "--show-toplevel"])
+            .ExecuteBufferedAsync()
+            .GetAwaiter().GetResult();
+
+        var dir = result.StandardOutput.Trim();
+        return string.IsNullOrEmpty(dir)
+            ? Result<string>.Failure("Not in a git repository")
+            : Result<string>.Success(dir);
+    }
+    catch (Exception ex)
+    {
+        return Result<string>.Failure(ex.Message);
+    }
+}
+
+static Result<string[]> GetGitBranches(string workingDirectory)
+{
+    try
+    {
+        var result = Cli.Wrap("git")
+            .WithWorkingDirectory(workingDirectory)
+            .WithArguments(["branch", "--format=%(refname:short)"])
+            .ExecuteBufferedAsync()
+            .GetAwaiter().GetResult();
+
+        var branches = result.StandardOutput
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        return branches.Length == 0
+            ? Result<string[]>.Failure("No branches found")
+            : Result<string[]>.Success(branches);
+    }
+    catch (Exception ex)
+    {
+        return Result<string[]>.Failure(ex.Message);
+    }
+}
 
 public abstract record Result<T>
 {
