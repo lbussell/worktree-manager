@@ -9,7 +9,7 @@
 using CliWrap;
 using CliWrap.Buffered;
 
-GetWorkingDirectory()
+await GetWorkingDirectory()
     .Bind(GetGitBranches)
     .Match(PrintBranches, PrintError);
 
@@ -25,14 +25,13 @@ static void PrintError(string message)
     Console.WriteLine($"Error: {message}");
 }
 
-static Result<string> GetWorkingDirectory()
+static async Task<Result<string>> GetWorkingDirectory()
 {
     try
     {
-        var result = Cli.Wrap("git")
+        var result = await Cli.Wrap("git")
             .WithArguments(["rev-parse", "--show-toplevel"])
-            .ExecuteBufferedAsync()
-            .GetAwaiter().GetResult();
+            .ExecuteBufferedAsync();
 
         var dir = result.StandardOutput.Trim();
         return string.IsNullOrEmpty(dir)
@@ -45,15 +44,14 @@ static Result<string> GetWorkingDirectory()
     }
 }
 
-static Result<string[]> GetGitBranches(string workingDirectory)
+static async Task<Result<string[]>> GetGitBranches(string workingDirectory)
 {
     try
     {
-        var result = Cli.Wrap("git")
+        var result = await Cli.Wrap("git")
             .WithWorkingDirectory(workingDirectory)
             .WithArguments(["branch", "--format=%(refname:short)"])
-            .ExecuteBufferedAsync()
-            .GetAwaiter().GetResult();
+            .ExecuteBufferedAsync();
 
         var branches = result.StandardOutput
             .Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -112,6 +110,40 @@ public abstract record Result<T>
         }
     }
 
+    public async Task<Result<U>> BindAsync<U>(Func<T, Task<Result<U>>> f) => this switch
+    {
+        Ok(var v) => await f(v),
+        Error(var msg) => Result<U>.Failure(msg),
+        _ => throw new InvalidOperationException()
+    };
+
     public bool IsOk => this is Ok;
     public bool IsError => this is Error;
+}
+
+public static class ResultExtensions
+{
+    public static async Task<Result<U>> Bind<T, U>(this Task<Result<T>> task, Func<T, Result<U>> f)
+    {
+        var result = await task;
+        return result.Bind(f);
+    }
+
+    public static async Task<Result<U>> Bind<T, U>(this Task<Result<T>> task, Func<T, Task<Result<U>>> f)
+    {
+        var result = await task;
+        return await result.BindAsync(f);
+    }
+
+    public static async Task<Result<U>> Map<T, U>(this Task<Result<T>> task, Func<T, U> f)
+    {
+        var result = await task;
+        return result.Map(f);
+    }
+
+    public static async Task Match<T>(this Task<Result<T>> task, Action<T> onOk, Action<string> onError)
+    {
+        var result = await task;
+        result.Match(onOk, onError);
+    }
 }
