@@ -9,7 +9,6 @@
 using CliWrap;
 using CliWrap.Buffered;
 using Spectre.Console;
-using static Spectre.Console.AnsiConsole;
 
 await GetWorkingDirectory()
     .Bind(GetGitBranches)
@@ -33,6 +32,7 @@ static async Task<Result<Branch[]>> GetGitBranches(string workingDirectory)
         var result = await Cli.Wrap("git")
             .WithWorkingDirectory(workingDirectory)
             .WithArguments(["branch",
+                "--sort=-committerdate",
                 "--format=%(HEAD)|%(refname:short)|%(subject)|%(creatordate:relative)"])
             .ExecuteBufferedAsync();
 
@@ -64,7 +64,7 @@ static Result<T> Choose<T>(string title, T[] choices, Func<T, string> displayCon
     if (choices.Length == 0)
         return Result<T>.Failure("No choices available");
 
-    var selected = Prompt(
+    var selected = AnsiConsole.Prompt(
         new SelectionPrompt<T>()
             .Title(title)
             .UseConverter(displayConverter)
@@ -74,11 +74,11 @@ static Result<T> Choose<T>(string title, T[] choices, Func<T, string> displayCon
 }
 
 static string FormatBranchSpectreConsole(Branch b) =>
-    $"({Spectre.Console.Markup.Escape(b.LastCommitDate)}){(b.IsCurrent ? " *" : "")} {Spectre.Console.Markup.Escape(b.Name)} [gray]{Spectre.Console.Markup.Escape(b.LastCommit)}[/]";
+    $"{(b.IsCurrent ? "*" : "")}({Markup.Escape(b.LastCommitDate)}) {Markup.Escape(b.Name)} [gray]{Spectre.Console.Markup.Escape(b.LastCommit)}[/]";
 
-static void PrintOk(string result) => MarkupLine($"[green]OK[/]: {result}");
+static void PrintOk(string result) => AnsiConsole.MarkupLineInterpolated($"[green]OK[/]: {result}");
 
-static void PrintError(string message) => MarkupLineInterpolated($"[red]Error[/]: {message}");
+static void PrintError(string message) => AnsiConsole.MarkupLineInterpolated($"[red]Error[/]: {message}");
 
 public record Branch(string Name, bool IsCurrent, string LastCommit, string LastCommitDate);
 
