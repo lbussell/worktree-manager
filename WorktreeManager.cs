@@ -9,19 +9,20 @@
 using CliWrap;
 using CliWrap.Buffered;
 
-var result = GetWorkingDirectory()
-    .Bind(GetGitBranches);
+GetWorkingDirectory()
+    .Bind(GetGitBranches)
+    .Match(PrintBranches, PrintError);
 
-switch (result)
+static void PrintBranches(string[] branches)
 {
-    case Result<string[]>.Ok(var branches):
-        Console.WriteLine("Branches:");
-        foreach (var branch in branches)
-            Console.WriteLine($"  {branch}");
-        break;
-    case Result<string[]>.Error(var msg):
-        Console.WriteLine($"Error: {msg}");
-        break;
+    Console.WriteLine("Branches:");
+    foreach (var branch in branches)
+        Console.WriteLine($"  {branch}");
+}
+
+static void PrintError(string message)
+{
+    Console.WriteLine($"Error: {message}");
 }
 
 static Result<string> GetWorkingDirectory()
@@ -101,6 +102,15 @@ public abstract record Result<T>
         Ok(var v) => v,
         _ => fallback
     };
+
+    public void Match(Action<T> onOk, Action<string> onError)
+    {
+        switch (this)
+        {
+            case Ok(var v): onOk(v); break;
+            case Error(var msg): onError(msg); break;
+        }
+    }
 
     public bool IsOk => this is Ok;
     public bool IsError => this is Error;
