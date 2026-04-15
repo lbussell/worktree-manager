@@ -14,6 +14,7 @@ AnsiConsole.WriteLine();
 
 MenuOption[] menuOptions = [
     new("Branches", BrowseBranches),
+    new("Worktrees", BrowseWorktrees),
     new("Exit", () => Task.FromResult(Result<string>.Success("Exiting"))),
 ];
 
@@ -26,6 +27,12 @@ static async Task<Result<string>> BrowseBranches() =>
         .BindAsync(GetGitBranches)
         .Bind(branches => Choose(branches, FormatBranchSpectreConsole, "Select a branch:"))
         .Map(branch => branch.Name);
+
+static async Task<Result<string>> BrowseWorktrees() =>
+    await GetWorkingDirectory()
+        .BindAsync(GetGitWorktrees)
+        .Bind(worktrees => Choose(worktrees, FormatWorktree, "Select a worktree:"))
+        .Map(wt => wt.Path);
 
 static Result<string> GetWorkingDirectory()
 {
@@ -69,6 +76,38 @@ static async Task<Result<Branch[]>> GetGitBranches(string workingDirectory)
     }
 }
 
+static async Task<Result<Worktree[]>> GetGitWorktrees(string workingDirectory)
+{
+    try
+    {
+        var result = await Cli.Wrap("git")
+            .WithWorkingDirectory(workingDirectory)
+            .WithArguments(["worktree", "list", "--porcelain"])
+            .ExecuteBufferedAsync();
+
+        var worktrees = result.StandardOutput
+            .Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Select(block =>
+            {
+                var lines = block.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                var path = lines.FirstOrDefault(l => l.StartsWith("worktree "))?["worktree ".Length..] ?? "";
+                var branch = lines.FirstOrDefault(l => l.StartsWith("branch "))?["branch ".Length..] ?? "";
+                if (branch.StartsWith("refs/heads/"))
+                    branch = branch["refs/heads/".Length..];
+                return new Worktree(path, branch);
+            })
+            .ToArray();
+
+        return worktrees.Length == 0
+            ? Result<Worktree[]>.Failure("No worktrees found")
+            : Result<Worktree[]>.Success(worktrees);
+    }
+    catch (Exception ex)
+    {
+        return Result<Worktree[]>.Failure(ex.Message);
+    }
+}
+
 static Result<T> Choose<T>(T[] choices, Func<T, string> displayConverter, string? title = null) where T : notnull
 {
     if (choices.Length == 0)
@@ -89,11 +128,15 @@ static Result<T> Choose<T>(T[] choices, Func<T, string> displayConverter, string
 static string FormatBranchSpectreConsole(Branch b) =>
     $"{(b.IsCurrent ? "*" : "")}({Markup.Escape(b.LastCommitDate)}) {Markup.Escape(b.Name)} [gray]{Spectre.Console.Markup.Escape(b.LastCommit)}[/]";
 
+static string FormatWorktree(Worktree wt) =>
+    $"{Markup.Escape(wt.Path)} [blue]{Markup.Escape(wt.Branch)}[/]";
+
 static void PrintOk(string result) => AnsiConsole.MarkupLineInterpolated($"[green]OK[/]: {result}");
 
 static void PrintError(string message) => AnsiConsole.MarkupLineInterpolated($"[red]Error[/]: {message}");
 
 public record Branch(string Name, bool IsCurrent, string LastCommit, string LastCommitDate);
+public record Worktree(string Path, string Branch);
 public record MenuOption(string Name, Func<Task<Result<string>>> Action);
 
 #region Result<T>
