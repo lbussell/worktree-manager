@@ -15,24 +15,94 @@ AnsiConsole.WriteLine();
 MenuOption[] menuOptions = [
     new("Branches", ChooseBranch),
     new("Worktrees", ChooseWorktree),
+    new("Cleanup", Cleanup),
     new("Exit", () => Task.FromResult(Result<string>.Success("Exiting"))),
 ];
 
-await Choose(menuOptions, o => o.Name)
+await ChooseOne(menuOptions, o => o.Name)
     .BindAsync(option => option.Action())
     .Match(PrintOk, PrintError);
 
 static async Task<Result<string>> ChooseBranch() =>
     await GetWorkingDirectory()
         .BindAsync(GetGitBranches)
-        .Bind(branches => Choose(branches, FormatBranchSpectreConsole, "Select a branch:"))
+        .Bind(branches => ChooseOne(branches, FormatBranchSpectreConsole, "Select a branch:"))
         .Map(branch => branch.Name);
 
 static async Task<Result<string>> ChooseWorktree() =>
     await GetWorkingDirectory()
         .BindAsync(GetGitWorktrees)
-        .Bind(worktrees => Choose(worktrees, FormatWorktree, "Select a worktree:"))
+        .Bind(worktrees => ChooseOne(worktrees, FormatWorktree, "Select a worktree:"))
         .Map(wt => wt.Path);
+
+static async Task<Result<Branch[]>> ChooseOneOrMoreBranches(string? title = null) =>
+    await GetWorkingDirectory()
+        .BindAsync(GetGitBranches)
+        .Bind(branches => ChooseOneOrMore(
+            branches.Where(b => !b.IsCurrent).ToArray(),
+            FormatBranchSpectreConsole,
+            title ?? "Select branches:"));
+
+static async Task<Result<Worktree[]>> ChooseOneOrMoreWorktrees(string? title = null) =>
+    await GetWorkingDirectory()
+        .BindAsync(GetGitWorktrees)
+        .Bind(worktrees => ChooseOneOrMore(
+            worktrees,
+            FormatWorktree,
+            title ?? "Select worktrees:"));
+
+static async Task<Result<string>> Cleanup() =>
+    await ChooseOne<MenuOption>([
+        new("Branches", CleanupBranches),
+        new("Worktrees", CleanupWorktrees),
+    ], o => o.Name, "Clean up:")
+    .BindAsync(option => option.Action());
+
+static async Task<Result<string>> CleanupBranches() =>
+    await ChooseOneOrMoreBranches("Select branches to remove:")
+        .BindEach(RemoveBranch)
+        .Sequence()
+        .Map(names => $"Removed {names.Length} branch(es): {string.Join(", ", names)}");
+
+static async Task<Result<string>> CleanupWorktrees() =>
+    await ChooseOneOrMoreWorktrees("Select worktrees to remove:")
+        .BindEach(RemoveWorktree)
+        .Sequence()
+        .Map(names => $"Removed {names.Length} worktree(s): {string.Join(", ", names)}");
+
+static async Task<Result<string>> RemoveBranch(Branch branch)
+{
+    try
+    {
+        var dir = GetWorkingDirectory().Unwrap();
+        await Cli.Wrap("git")
+            .WithWorkingDirectory(dir)
+            .WithArguments(["branch", "-d", branch.Name])
+            .ExecuteBufferedAsync();
+        return Result<string>.Success(branch.Name);
+    }
+    catch (Exception ex)
+    {
+        return Result<string>.Failure($"{branch.Name}: {ex.Message}");
+    }
+}
+
+static async Task<Result<string>> RemoveWorktree(Worktree wt)
+{
+    try
+    {
+        var dir = GetWorkingDirectory().Unwrap();
+        await Cli.Wrap("git")
+            .WithWorkingDirectory(dir)
+            .WithArguments(["worktree", "remove", wt.Path])
+            .ExecuteBufferedAsync();
+        return Result<string>.Success(wt.Branch);
+    }
+    catch (Exception ex)
+    {
+        return Result<string>.Failure($"{wt.Branch}: {ex.Message}");
+    }
+}
 
 static Result<string> GetWorkingDirectory()
 {
@@ -108,7 +178,7 @@ static async Task<Result<Worktree[]>> GetGitWorktrees(string workingDirectory)
     }
 }
 
-static Result<T> Choose<T>(T[] choices, Func<T, string> displayConverter, string? title = null) where T : notnull
+static Result<T> ChooseOne<T>(T[] choices, Func<T, string> displayConverter, string? title = null) where T : notnull
 {
     if (choices.Length == 0)
         return Result<T>.Failure("No choices available");
@@ -123,6 +193,25 @@ static Result<T> Choose<T>(T[] choices, Func<T, string> displayConverter, string
     var selected = AnsiConsole.Prompt(prompt);
 
     return Result<T>.Success(selected);
+}
+
+static Result<T[]> ChooseOneOrMore<T>(T[] choices, Func<T, string> displayConverter, string? title = null) where T : notnull
+{
+    if (choices.Length == 0)
+        return Result<T[]>.Failure("No choices available");
+
+    var prompt = new MultiSelectionPrompt<T>()
+        .UseConverter(displayConverter)
+        .AddChoices(choices);
+
+    if (!string.IsNullOrEmpty(title))
+        prompt.Title(title);
+
+    var selected = AnsiConsole.Prompt(prompt);
+
+    return selected.Count == 0
+        ? Result<T[]>.Failure("Nothing selected")
+        : Result<T[]>.Success([.. selected]);
 }
 
 static string FormatBranchSpectreConsole(Branch b) =>
@@ -225,6 +314,46 @@ public static class ResultExtensions
         {
             var r = await task;
             r.Match(onOk, onError);
+        }
+    }
+    extension<T>(Task<Result<T[]>> task)
+    {
+        public async Task<Result<U>[]> BindEach<U>(Func<T, Task<Result<U>>> f)
+        {
+            var r = await task;
+            if (r is Result<T[]>.Error(var msg))
+                return [Result<U>.Failure(msg)];
+
+            var items = ((Result<T[]>.Ok)r).Value;
+            var results = new Result<U>[items.Length];
+            for (int i = 0; i < items.Length; i++)
+                results[i] = await f(items[i]);
+            return results;
+        }
+    }
+
+    extension<T>(Result<T>[] results)
+    {
+        public Result<T[]> Sequence()
+        {
+            List<T> successes = [];
+            List<string> errors = [];
+
+            foreach (var r in results)
+                r.Match(v => successes.Add(v), err => errors.Add(err));
+
+            return errors.Count > 0
+                ? Result<T[]>.Failure(string.Join("; ", errors))
+                : Result<T[]>.Success([.. successes]);
+        }
+    }
+
+    extension<T>(Task<Result<T>[]> task)
+    {
+        public async Task<Result<T[]>> Sequence()
+        {
+            var results = await task;
+            return results.Sequence();
         }
     }
 }
