@@ -15,11 +15,12 @@ await GetWorkingDirectory()
     .Bind(branches => Choose("Select a branch:", branches, FormatBranch))
     .Match(PrintResult, PrintError);
 
-static string FormatBranch(string branch) => $"🌿 {branch}";
+static string FormatBranch(Branch b) =>
+    $"{(b.IsCurrent ? "* " : "  ")}{b.Name} ({b.LastCommitDate}) [dim]{b.LastCommit}[/]";
 
-static void PrintResult(string value)
+static void PrintResult(Branch branch)
 {
-    AnsiConsole.MarkupLine($"[green]Selected:[/] {value}");
+    AnsiConsole.MarkupLine($"[green]Selected:[/] {branch.Name}");
 }
 
 static void PrintError(string message)
@@ -50,27 +51,40 @@ static Task<Result<string>> GetWorkingDirectory()
     return Task.FromResult(result);
 }
 
-static async Task<Result<string[]>> GetGitBranches(string workingDirectory)
+static async Task<Result<Branch[]>> GetGitBranches(string workingDirectory)
 {
     try
     {
         var result = await Cli.Wrap("git")
             .WithWorkingDirectory(workingDirectory)
-            .WithArguments(["branch", "--format=%(refname:short)"])
+            .WithArguments(["branch",
+                "--format=%(HEAD)|%(refname:short)|%(subject)|%(creatordate:relative)"])
             .ExecuteBufferedAsync();
 
         var branches = result.StandardOutput
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line =>
+            {
+                var parts = line.Split('|', 4);
+                return new Branch(
+                    Name: parts[1],
+                    IsCurrent: parts[0] == "*",
+                    LastCommit: parts[2],
+                    LastCommitDate: parts[3]);
+            })
+            .ToArray();
 
         return branches.Length == 0
-            ? Result<string[]>.Failure("No branches found")
-            : Result<string[]>.Success(branches);
+            ? Result<Branch[]>.Failure("No branches found")
+            : Result<Branch[]>.Success(branches);
     }
     catch (Exception ex)
     {
-        return Result<string[]>.Failure(ex.Message);
+        return Result<Branch[]>.Failure(ex.Message);
     }
 }
+
+public record Branch(string Name, bool IsCurrent, string LastCommit, string LastCommitDate);
 
 #region Result<T>
 
