@@ -9,38 +9,13 @@
 using CliWrap;
 using CliWrap.Buffered;
 using Spectre.Console;
+using static Spectre.Console.AnsiConsole;
 
 await GetWorkingDirectory()
     .Bind(GetGitBranches)
     .Bind(branches => Choose("Select a branch:", branches, FormatBranch))
-    .Match(PrintResult, PrintError);
-
-static string FormatBranch(Branch b) =>
-    $"{(b.IsCurrent ? "* " : "  ")}{b.Name} ({b.LastCommitDate}) [dim]{b.LastCommit}[/]";
-
-static void PrintResult(Branch branch)
-{
-    AnsiConsole.MarkupLine($"[green]Selected:[/] {branch.Name}");
-}
-
-static void PrintError(string message)
-{
-    Console.WriteLine($"Error: {message}");
-}
-
-static Result<T> Choose<T>(string title, T[] choices, Func<T, string> display) where T : notnull
-{
-    if (choices.Length == 0)
-        return Result<T>.Failure("No choices available");
-
-    var selected = AnsiConsole.Prompt(
-        new SelectionPrompt<T>()
-            .Title(title)
-            .UseConverter(display)
-            .AddChoices(choices));
-
-    return Result<T>.Success(selected);
-}
+    .Map(branch => branch.Name)
+    .Match(PrintOk, PrintError);
 
 static Task<Result<string>> GetWorkingDirectory()
 {
@@ -83,6 +58,27 @@ static async Task<Result<Branch[]>> GetGitBranches(string workingDirectory)
         return Result<Branch[]>.Failure(ex.Message);
     }
 }
+
+static Result<T> Choose<T>(string title, T[] choices, Func<T, string> display) where T : notnull
+{
+    if (choices.Length == 0)
+        return Result<T>.Failure("No choices available");
+
+    var selected = Prompt(
+        new SelectionPrompt<T>()
+            .Title(title)
+            .UseConverter(display)
+            .AddChoices(choices));
+
+    return Result<T>.Success(selected);
+}
+
+static string FormatBranch(Branch b) =>
+    $"{(b.IsCurrent ? "* " : "  ")}{b.Name} ({b.LastCommitDate}) [dim]{b.LastCommit}[/]";
+
+static void PrintOk(string result) => MarkupLine($"[green]OK[/]: {result}");
+
+static void PrintError(string message) => MarkupLineInterpolated($"[red]Error[/]: {message}");
 
 public record Branch(string Name, bool IsCurrent, string LastCommit, string LastCommitDate);
 
