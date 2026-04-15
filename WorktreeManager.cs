@@ -10,11 +10,22 @@ using CliWrap;
 using CliWrap.Buffered;
 using Spectre.Console;
 
-await GetWorkingDirectory()
-    .Bind(GetGitBranches)
-    .Bind(branches => Choose("Select a branch:", branches, FormatBranchSpectreConsole))
-    .Map(branch => branch.Name)
+AnsiConsole.WriteLine();
+
+MenuOption[] menuOptions = [
+    new("Branches", BrowseBranches),
+    new("Exit", () => Task.FromResult(Result<string>.Success("Exiting"))),
+];
+
+await Choose(menuOptions, o => o.Name)
+    .BindAsync(option => option.Action())
     .Match(PrintOk, PrintError);
+
+static async Task<Result<string>> BrowseBranches() =>
+    await GetWorkingDirectory()
+        .Bind(GetGitBranches)
+        .Bind(branches => Choose(branches, FormatBranchSpectreConsole, "Select a branch:"))
+        .Map(branch => branch.Name);
 
 static Task<Result<string>> GetWorkingDirectory()
 {
@@ -59,16 +70,19 @@ static async Task<Result<Branch[]>> GetGitBranches(string workingDirectory)
     }
 }
 
-static Result<T> Choose<T>(string title, T[] choices, Func<T, string> displayConverter) where T : notnull
+static Result<T> Choose<T>(T[] choices, Func<T, string> displayConverter, string? title = null) where T : notnull
 {
     if (choices.Length == 0)
         return Result<T>.Failure("No choices available");
 
-    var selected = AnsiConsole.Prompt(
-        new SelectionPrompt<T>()
-            .Title(title)
-            .UseConverter(displayConverter)
-            .AddChoices(choices));
+    var prompt = new SelectionPrompt<T>()
+        .UseConverter(displayConverter)
+        .AddChoices(choices);
+
+    if (!string.IsNullOrEmpty(title))
+        prompt.Title(title);
+
+    var selected = AnsiConsole.Prompt(prompt);
 
     return Result<T>.Success(selected);
 }
@@ -81,6 +95,7 @@ static void PrintOk(string result) => AnsiConsole.MarkupLineInterpolated($"[gree
 static void PrintError(string message) => AnsiConsole.MarkupLineInterpolated($"[red]Error[/]: {message}");
 
 public record Branch(string Name, bool IsCurrent, string LastCommit, string LastCommitDate);
+public record MenuOption(string Name, Func<Task<Result<string>>> Action);
 
 #region Result<T>
 
