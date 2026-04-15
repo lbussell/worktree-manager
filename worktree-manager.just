@@ -230,7 +230,7 @@ show-pr number:
 # List worktrees and show details for the selected one
 list-worktrees:
     #!/usr/bin/env bash
-    selection=$(git worktree list | awk '{print $1}' | gum filter) || exit 0
+    selection=$(git worktree list | awk '{print $1}' | gum choose) || exit 0
     [[ -z "$selection" ]] && exit 0
     {{ _self }} show-worktree "$selection"
 
@@ -321,7 +321,7 @@ _create-branch:
         full_branch="$branch_name"
     fi
 
-    git branch "$full_branch" "$base" >&2
+    git branch --no-track "$full_branch" "$base" >&2
     echo >&2 "Created branch $full_branch from $base"
     echo "$full_branch"
 
@@ -330,7 +330,7 @@ _create-worktree branch:
     #!/usr/bin/env bash
     branch="{{ branch }}"
     dir_name="${branch#dev/loganbussell/}"
-    repo_name=$(basename "$(git rev-parse --show-toplevel)")
+    repo_name=$(basename "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")")
     wt_path="$HOME/w/$repo_name/$dir_name"
     git worktree add "$wt_path" "$branch" >&2
     echo "$wt_path"
