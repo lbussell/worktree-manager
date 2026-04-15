@@ -13,7 +13,7 @@ using static Spectre.Console.AnsiConsole;
 
 await GetWorkingDirectory()
     .Bind(GetGitBranches)
-    .Bind(branches => Choose("Select a branch:", branches, FormatBranch))
+    .Bind(branches => Choose("Select a branch:", branches, FormatBranchSpectreConsole))
     .Map(branch => branch.Name)
     .Match(PrintOk, PrintError);
 
@@ -59,7 +59,7 @@ static async Task<Result<Branch[]>> GetGitBranches(string workingDirectory)
     }
 }
 
-static Result<T> Choose<T>(string title, T[] choices, Func<T, string> display) where T : notnull
+static Result<T> Choose<T>(string title, T[] choices, Func<T, string> displayConverter) where T : notnull
 {
     if (choices.Length == 0)
         return Result<T>.Failure("No choices available");
@@ -67,14 +67,14 @@ static Result<T> Choose<T>(string title, T[] choices, Func<T, string> display) w
     var selected = Prompt(
         new SelectionPrompt<T>()
             .Title(title)
-            .UseConverter(display)
+            .UseConverter(displayConverter)
             .AddChoices(choices));
 
     return Result<T>.Success(selected);
 }
 
-static string FormatBranch(Branch b) =>
-    $"{(b.IsCurrent ? "* " : "  ")}{b.Name} ({b.LastCommitDate}) [dim]{b.LastCommit}[/]";
+static string FormatBranchSpectreConsole(Branch b) =>
+    $"({Spectre.Console.Markup.Escape(b.LastCommitDate)}){(b.IsCurrent ? " *" : "")} {Spectre.Console.Markup.Escape(b.Name)} [gray]{Spectre.Console.Markup.Escape(b.LastCommit)}[/]";
 
 static void PrintOk(string result) => MarkupLine($"[green]OK[/]: {result}");
 
