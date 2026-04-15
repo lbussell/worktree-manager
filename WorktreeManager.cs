@@ -23,17 +23,16 @@ await Choose(menuOptions, o => o.Name)
 
 static async Task<Result<string>> BrowseBranches() =>
     await GetWorkingDirectory()
-        .Bind(GetGitBranches)
+        .BindAsync(GetGitBranches)
         .Bind(branches => Choose(branches, FormatBranchSpectreConsole, "Select a branch:"))
         .Map(branch => branch.Name);
 
-static Task<Result<string>> GetWorkingDirectory()
+static Result<string> GetWorkingDirectory()
 {
     var dir = Directory.GetCurrentDirectory();
-    var result = string.IsNullOrEmpty(dir)
+    return string.IsNullOrEmpty(dir)
         ? Result<string>.Failure("Could not determine working directory")
         : Result<string>.Success(dir);
-    return Task.FromResult(result);
 }
 
 static async Task<Result<Branch[]>> GetGitBranches(string workingDirectory)
