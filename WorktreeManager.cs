@@ -35,7 +35,7 @@ static async Task<Result<string>> ChooseWorktree() =>
         .Bind(worktrees => ChooseOne(worktrees, FormatWorktree, "Select a worktree:"))
         .Map(wt => wt.Path);
 
-static async Task<Result<Branch[]>> ChooseOneOrMoreBranches(string? title = null) =>
+static async Task<Result<Branch[]>> ChooseBranches(string? title = null) =>
     await GetWorkingDirectory()
         .BindAsync(GetGitBranches)
         .Bind(branches => ChooseOneOrMore(
@@ -43,7 +43,7 @@ static async Task<Result<Branch[]>> ChooseOneOrMoreBranches(string? title = null
             FormatBranchSpectreConsole,
             title ?? "Select branches:"));
 
-static async Task<Result<Worktree[]>> ChooseOneOrMoreWorktrees(string? title = null) =>
+static async Task<Result<Worktree[]>> ChooseWorktrees(string? title = null) =>
     await GetWorkingDirectory()
         .BindAsync(GetGitWorktrees)
         .Bind(worktrees => ChooseOneOrMore(
@@ -59,50 +59,52 @@ static async Task<Result<string>> Cleanup() =>
     .BindAsync(option => option.Action());
 
 static async Task<Result<string>> CleanupBranches() =>
-    await ChooseOneOrMoreBranches("Select branches to remove:")
+    await ChooseBranches("Select branches to remove:")
         .BindEach(RemoveBranch)
         .Sequence()
         .Map(names => $"Removed {names.Length} branch(es): {string.Join(", ", names)}");
 
 static async Task<Result<string>> CleanupWorktrees() =>
-    await ChooseOneOrMoreWorktrees("Select worktrees to remove:")
+    await ChooseWorktrees("Select worktrees to remove:")
         .BindEach(RemoveWorktree)
         .Sequence()
         .Map(names => $"Removed {names.Length} worktree(s): {string.Join(", ", names)}");
 
-static async Task<Result<string>> RemoveBranch(Branch branch)
-{
-    try
-    {
-        var dir = GetWorkingDirectory().Unwrap();
-        await Cli.Wrap("git")
-            .WithWorkingDirectory(dir)
-            .WithArguments(["branch", "-d", branch.Name])
-            .ExecuteBufferedAsync();
-        return Result<string>.Success(branch.Name);
-    }
-    catch (Exception ex)
-    {
-        return Result<string>.Failure($"{branch.Name}: {ex.Message}");
-    }
-}
+static async Task<Result<string>> RemoveBranch(Branch branch) =>
+    await GetWorkingDirectory()
+        .BindAsync(async dir =>
+        {
+            try
+            {
+                await Cli.Wrap("git")
+                    .WithWorkingDirectory(dir)
+                    .WithArguments(["branch", "-d", branch.Name])
+                    .ExecuteBufferedAsync();
+                return Result<string>.Success(branch.Name);
+            }
+            catch (Exception ex)
+            {
+                return Result<string>.Failure($"{branch.Name}: {ex.Message}");
+            }
+        });
 
-static async Task<Result<string>> RemoveWorktree(Worktree wt)
-{
-    try
-    {
-        var dir = GetWorkingDirectory().Unwrap();
-        await Cli.Wrap("git")
-            .WithWorkingDirectory(dir)
-            .WithArguments(["worktree", "remove", wt.Path])
-            .ExecuteBufferedAsync();
-        return Result<string>.Success(wt.Branch);
-    }
-    catch (Exception ex)
-    {
-        return Result<string>.Failure($"{wt.Branch}: {ex.Message}");
-    }
-}
+static async Task<Result<string>> RemoveWorktree(Worktree wt) =>
+    await GetWorkingDirectory()
+        .BindAsync(async dir =>
+        {
+            try
+            {
+                await Cli.Wrap("git")
+                    .WithWorkingDirectory(dir)
+                    .WithArguments(["worktree", "remove", wt.Path])
+                    .ExecuteBufferedAsync();
+                return Result<string>.Success(wt.Branch);
+            }
+            catch (Exception ex)
+            {
+                return Result<string>.Failure($"{wt.Branch}: {ex.Message}");
+            }
+        });
 
 static Result<string> GetWorkingDirectory()
 {
@@ -264,13 +266,6 @@ public static class ResultExtensions
         {
             Result<T>.Ok(var v) => await f(v),
             Result<T>.Error(var msg) => Result<U>.Failure(msg),
-            _ => throw new InvalidOperationException()
-        };
-
-        public T Unwrap() => result switch
-        {
-            Result<T>.Ok(var v) => v,
-            Result<T>.Error(var msg) => throw new InvalidOperationException($"Unwrap called on Error: {msg}"),
             _ => throw new InvalidOperationException()
         };
 
