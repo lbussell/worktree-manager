@@ -8,21 +8,37 @@
 
 using CliWrap;
 using CliWrap.Buffered;
+using Spectre.Console;
 
 await GetWorkingDirectory()
     .Bind(GetGitBranches)
-    .Match(PrintBranches, PrintError);
+    .Bind(branches => Choose("Select a branch:", branches, FormatBranch))
+    .Match(PrintResult, PrintError);
 
-static void PrintBranches(string[] branches)
+static string FormatBranch(string branch) => $"🌿 {branch}";
+
+static void PrintResult(string value)
 {
-    Console.WriteLine("Branches:");
-    foreach (var branch in branches)
-        Console.WriteLine($"  {branch}");
+    AnsiConsole.MarkupLine($"[green]Selected:[/] {value}");
 }
 
 static void PrintError(string message)
 {
     Console.WriteLine($"Error: {message}");
+}
+
+static Result<T> Choose<T>(string title, T[] choices, Func<T, string> display) where T : notnull
+{
+    if (choices.Length == 0)
+        return Result<T>.Failure("No choices available");
+
+    var selected = AnsiConsole.Prompt(
+        new SelectionPrompt<T>()
+            .Title(title)
+            .UseConverter(display)
+            .AddChoices(choices));
+
+    return Result<T>.Success(selected);
 }
 
 static Task<Result<string>> GetWorkingDirectory()
