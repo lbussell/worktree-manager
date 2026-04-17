@@ -52,8 +52,7 @@ public sealed class ResultTests
     [TestMethod]
     public void Bind_Ok_AppliesFunction()
     {
-        var result = Result<int>.Success(5)
-            .Bind(x => Result<string>.Success(x.ToString()));
+        var result = Result<int>.Success(5).Bind(x => Result<string>.Success(x.ToString()));
         Assert.IsInstanceOfType<Result<string>.Ok>(result);
         Assert.AreEqual("5", ((Result<string>.Ok)result).Value);
     }
@@ -61,8 +60,7 @@ public sealed class ResultTests
     [TestMethod]
     public void Bind_Ok_CanReturnError()
     {
-        var result = Result<int>.Success(5)
-            .Bind(_ => Result<string>.Failure("nope"));
+        var result = Result<int>.Success(5).Bind(_ => Result<string>.Failure("nope"));
         Assert.IsInstanceOfType<Result<string>.Error>(result);
         Assert.AreEqual("nope", ((Result<string>.Error)result).Message);
     }
@@ -70,8 +68,7 @@ public sealed class ResultTests
     [TestMethod]
     public void Bind_Error_PropagatesError()
     {
-        var result = Result<int>.Failure("fail")
-            .Bind(x => Result<string>.Success(x.ToString()));
+        var result = Result<int>.Failure("fail").Bind(x => Result<string>.Success(x.ToString()));
         Assert.IsInstanceOfType<Result<string>.Error>(result);
         Assert.AreEqual("fail", ((Result<string>.Error)result).Message);
     }
@@ -79,7 +76,8 @@ public sealed class ResultTests
     [TestMethod]
     public async Task BindAsync_Ok_AppliesFunction()
     {
-        var result = await Result<int>.Success(5)
+        var result = await Result<int>
+            .Success(5)
             .BindAsync(x => Task.FromResult(Result<string>.Success(x.ToString())));
         Assert.IsInstanceOfType<Result<string>.Ok>(result);
         Assert.AreEqual("5", ((Result<string>.Ok)result).Value);
@@ -88,7 +86,8 @@ public sealed class ResultTests
     [TestMethod]
     public async Task BindAsync_Error_PropagatesError()
     {
-        var result = await Result<int>.Failure("fail")
+        var result = await Result<int>
+            .Failure("fail")
             .BindAsync(x => Task.FromResult(Result<string>.Success(x.ToString())));
         Assert.IsInstanceOfType<Result<string>.Error>(result);
         Assert.AreEqual("fail", ((Result<string>.Error)result).Message);
@@ -125,7 +124,8 @@ public sealed class ResultTests
     [TestMethod]
     public void Sequence_AllOk_ReturnsOkArray()
     {
-        Result<int>[] results = [
+        Result<int>[] results =
+        [
             Result<int>.Success(1),
             Result<int>.Success(2),
             Result<int>.Success(3),
@@ -138,7 +138,8 @@ public sealed class ResultTests
     [TestMethod]
     public void Sequence_WithErrors_ReturnsJoinedErrors()
     {
-        Result<int>[] results = [
+        Result<int>[] results =
+        [
             Result<int>.Success(1),
             Result<int>.Failure("err1"),
             Result<int>.Failure("err2"),
@@ -169,8 +170,7 @@ public sealed class ResultTests
     [TestMethod]
     public async Task TaskMap_Ok_TransformsValue()
     {
-        var result = await Task.FromResult(Result<int>.Success(5))
-            .Map(x => x * 2);
+        var result = await Task.FromResult(Result<int>.Success(5)).Map(x => x * 2);
         Assert.IsInstanceOfType<Result<int>.Ok>(result);
         Assert.AreEqual(10, ((Result<int>.Ok)result).Value);
     }
@@ -179,18 +179,14 @@ public sealed class ResultTests
     public async Task TaskMatch_Ok_CallsOnOk()
     {
         string? captured = null;
-        await Task.FromResult(Result<string>.Success("hello"))
-            .Match(v => captured = v, _ => { });
+        await Task.FromResult(Result<string>.Success("hello")).Match(v => captured = v, _ => { });
         Assert.AreEqual("hello", captured);
     }
 
     [TestMethod]
     public async Task TaskSequence_AllOk_ReturnsOkArray()
     {
-        Result<int>[] results = [
-            Result<int>.Success(1),
-            Result<int>.Success(2),
-        ];
+        Result<int>[] results = [Result<int>.Success(1), Result<int>.Success(2)];
         var sequenced = await Task.FromResult(results).Sequence();
         Assert.IsInstanceOfType<Result<int[]>.Ok>(sequenced);
         CollectionAssert.AreEqual(new[] { 1, 2 }, ((Result<int[]>.Ok)sequenced).Value);

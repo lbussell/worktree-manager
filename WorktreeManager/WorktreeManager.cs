@@ -7,7 +7,8 @@ using Spectre.Console;
 
 AnsiConsole.WriteLine();
 
-MenuOption[] menuOptions = [
+MenuOption[] menuOptions =
+[
     new("Branches", ChooseBranch),
     new("Worktrees", ChooseWorktree),
     new("Cleanup", Cleanup),
@@ -33,25 +34,28 @@ static async Task<Result<string>> ChooseWorktree() =>
 static async Task<Result<Branch[]>> ChooseBranches(string? title = null) =>
     await GetWorkingDirectory()
         .BindAsync(GetGitBranches)
-        .Bind(branches => ChooseOneOrMore(
-            branches.Where(b => !b.IsCurrent).ToArray(),
-            FormatBranchSpectreConsole,
-            title ?? "Select branches:"));
+        .Bind(branches =>
+            ChooseOneOrMore(
+                branches.Where(b => !b.IsCurrent).ToArray(),
+                FormatBranchSpectreConsole,
+                title ?? "Select branches:"
+            )
+        );
 
 static async Task<Result<Worktree[]>> ChooseWorktrees(string? title = null) =>
     await GetWorkingDirectory()
         .BindAsync(GetGitWorktrees)
-        .Bind(worktrees => ChooseOneOrMore(
-            worktrees,
-            FormatWorktree,
-            title ?? "Select worktrees:"));
+        .Bind(worktrees =>
+            ChooseOneOrMore(worktrees, FormatWorktree, title ?? "Select worktrees:")
+        );
 
 static async Task<Result<string>> Cleanup() =>
-    await ChooseOne<MenuOption>([
-        new("Branches", CleanupBranches),
-        new("Worktrees", CleanupWorktrees),
-    ], o => o.Name, "Clean up:")
-    .BindAsync(option => option.Action());
+    await ChooseOne<MenuOption>(
+            [new("Branches", CleanupBranches), new("Worktrees", CleanupWorktrees)],
+            o => o.Name,
+            "Clean up:"
+        )
+        .BindAsync(option => option.Action());
 
 static async Task<Result<string>> CleanupBranches() =>
     await ChooseBranches("Select branches to remove:")
@@ -115,13 +119,17 @@ static async Task<Result<Branch[]>> GetGitBranches(string workingDirectory)
     {
         var result = await Cli.Wrap("git")
             .WithWorkingDirectory(workingDirectory)
-            .WithArguments(["branch",
-                "--sort=-committerdate",
-                "--format=%(HEAD)|%(refname:short)|%(subject)|%(creatordate:relative)"])
+            .WithArguments(
+                [
+                    "branch",
+                    "--sort=-committerdate",
+                    "--format=%(HEAD)|%(refname:short)|%(subject)|%(creatordate:relative)",
+                ]
+            )
             .ExecuteBufferedAsync();
 
-        var branches = result.StandardOutput
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+        var branches = result
+            .StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(line =>
             {
                 var parts = line.Split('|', 4);
@@ -129,7 +137,8 @@ static async Task<Result<Branch[]>> GetGitBranches(string workingDirectory)
                     Name: parts[1],
                     IsCurrent: parts[0] == "*",
                     LastCommit: parts[2],
-                    LastCommitDate: parts[3]);
+                    LastCommitDate: parts[3]
+                );
             })
             .ToArray();
 
@@ -152,13 +161,16 @@ static async Task<Result<Worktree[]>> GetGitWorktrees(string workingDirectory)
             .WithArguments(["worktree", "list", "--porcelain"])
             .ExecuteBufferedAsync();
 
-        var worktrees = result.StandardOutput
-            .Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+        var worktrees = result
+            .StandardOutput.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
             .Select(block =>
             {
                 var lines = block.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                var path = lines.FirstOrDefault(l => l.StartsWith("worktree "))?["worktree ".Length..] ?? "";
-                var branch = lines.FirstOrDefault(l => l.StartsWith("branch "))?["branch ".Length..] ?? "";
+                var path =
+                    lines.FirstOrDefault(l => l.StartsWith("worktree "))?["worktree ".Length..]
+                    ?? "";
+                var branch =
+                    lines.FirstOrDefault(l => l.StartsWith("branch "))?["branch ".Length..] ?? "";
                 if (branch.StartsWith("refs/heads/"))
                     branch = branch["refs/heads/".Length..];
                 return new Worktree(path, branch);
@@ -175,14 +187,13 @@ static async Task<Result<Worktree[]>> GetGitWorktrees(string workingDirectory)
     }
 }
 
-static Result<T> ChooseOne<T>(T[] choices, Func<T, string> displayConverter, string? title = null) where T : notnull
+static Result<T> ChooseOne<T>(T[] choices, Func<T, string> displayConverter, string? title = null)
+    where T : notnull
 {
     if (choices.Length == 0)
         return Result<T>.Failure("No choices available");
 
-    var prompt = new SelectionPrompt<T>()
-        .UseConverter(displayConverter)
-        .AddChoices(choices);
+    var prompt = new SelectionPrompt<T>().UseConverter(displayConverter).AddChoices(choices);
 
     if (!string.IsNullOrEmpty(title))
         prompt.Title(title);
@@ -192,14 +203,17 @@ static Result<T> ChooseOne<T>(T[] choices, Func<T, string> displayConverter, str
     return Result<T>.Success(selected);
 }
 
-static Result<T[]> ChooseOneOrMore<T>(T[] choices, Func<T, string> displayConverter, string? title = null) where T : notnull
+static Result<T[]> ChooseOneOrMore<T>(
+    T[] choices,
+    Func<T, string> displayConverter,
+    string? title = null
+)
+    where T : notnull
 {
     if (choices.Length == 0)
         return Result<T[]>.Failure("No choices available");
 
-    var prompt = new MultiSelectionPrompt<T>()
-        .UseConverter(displayConverter)
-        .AddChoices(choices);
+    var prompt = new MultiSelectionPrompt<T>().UseConverter(displayConverter).AddChoices(choices);
 
     if (!string.IsNullOrEmpty(title))
         prompt.Title(title);
@@ -219,9 +233,11 @@ static string FormatWorktree(Worktree wt) =>
 
 static void PrintOk(string result) => AnsiConsole.MarkupLineInterpolated($"[green]OK[/]: {result}");
 
-static void PrintError(string message) => AnsiConsole.MarkupLineInterpolated($"[red]Error[/]: {message}");
+static void PrintError(string message) =>
+    AnsiConsole.MarkupLineInterpolated($"[red]Error[/]: {message}");
 
 public record Branch(string Name, bool IsCurrent, string LastCommit, string LastCommitDate);
-public record Worktree(string Path, string Branch);
-public record MenuOption(string Name, Func<Task<Result<string>>> Action);
 
+public record Worktree(string Path, string Branch);
+
+public record MenuOption(string Name, Func<Task<Result<string>>> Action);
