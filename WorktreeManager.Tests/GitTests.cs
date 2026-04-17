@@ -1,13 +1,13 @@
 namespace WorktreeManager.Tests;
 
 [TestClass]
-public sealed class GitParsingTests
+public sealed class GitTests
 {
     [TestMethod]
     public void ParseBranches_SingleBranch()
     {
         var output = "*|main|2 days ago|Initial commit\n";
-        var result = GitParsing.ParseBranches(output);
+        var result = Git.ParseBranches(output);
 
         Assert.IsInstanceOfType<Result<Branch[]>.Ok>(result);
         var branches = ((Result<Branch[]>.Ok)result).Value;
@@ -22,7 +22,7 @@ public sealed class GitParsingTests
     public void ParseBranches_MultipleBranches()
     {
         var output = "*|main|2 days ago|Initial commit\n |feature|1 day ago|Add feature\n";
-        var result = GitParsing.ParseBranches(output);
+        var result = Git.ParseBranches(output);
 
         Assert.IsInstanceOfType<Result<Branch[]>.Ok>(result);
         var branches = ((Result<Branch[]>.Ok)result).Value;
@@ -35,7 +35,7 @@ public sealed class GitParsingTests
     [TestMethod]
     public void ParseBranches_EmptyOutput_ReturnsFailure()
     {
-        var result = GitParsing.ParseBranches("");
+        var result = Git.ParseBranches("");
         Assert.IsInstanceOfType<Result<Branch[]>.Error>(result);
         Assert.AreEqual("No branches found", ((Result<Branch[]>.Error)result).Message);
     }
@@ -44,7 +44,7 @@ public sealed class GitParsingTests
     public void ParseBranches_CommitMessageWithPipes()
     {
         var output = " |fix|3 hours ago|Use a | b syntax\n";
-        var result = GitParsing.ParseBranches(output);
+        var result = Git.ParseBranches(output);
 
         Assert.IsInstanceOfType<Result<Branch[]>.Ok>(result);
         var branches = ((Result<Branch[]>.Ok)result).Value;
@@ -55,7 +55,7 @@ public sealed class GitParsingTests
     public void ParseWorktrees_SingleWorktree()
     {
         var output = "worktree /home/user/repo\nHEAD abc123\nbranch refs/heads/main\n";
-        var result = GitParsing.ParseWorktrees(output);
+        var result = Git.ParseWorktrees(output);
 
         Assert.IsInstanceOfType<Result<Worktree[]>.Ok>(result);
         var worktrees = ((Result<Worktree[]>.Ok)result).Value;
@@ -70,7 +70,7 @@ public sealed class GitParsingTests
         var output =
             "worktree /home/user/repo\nHEAD abc123\nbranch refs/heads/main\n\n"
             + "worktree /home/user/repo-feature\nHEAD def456\nbranch refs/heads/feature\n";
-        var result = GitParsing.ParseWorktrees(output);
+        var result = Git.ParseWorktrees(output);
 
         Assert.IsInstanceOfType<Result<Worktree[]>.Ok>(result);
         var worktrees = ((Result<Worktree[]>.Ok)result).Value;
@@ -83,7 +83,7 @@ public sealed class GitParsingTests
     public void ParseWorktrees_StripsRefsHeadsPrefix()
     {
         var output = "worktree /repo\nbranch refs/heads/my-branch\n";
-        var result = GitParsing.ParseWorktrees(output);
+        var result = Git.ParseWorktrees(output);
 
         Assert.IsInstanceOfType<Result<Worktree[]>.Ok>(result);
         Assert.AreEqual("my-branch", ((Result<Worktree[]>.Ok)result).Value[0].Branch);
@@ -92,7 +92,7 @@ public sealed class GitParsingTests
     [TestMethod]
     public void ParseWorktrees_EmptyOutput_ReturnsFailure()
     {
-        var result = GitParsing.ParseWorktrees("");
+        var result = Git.ParseWorktrees("");
         Assert.IsInstanceOfType<Result<Worktree[]>.Error>(result);
         Assert.AreEqual("No worktrees found", ((Result<Worktree[]>.Error)result).Message);
     }
@@ -101,7 +101,7 @@ public sealed class GitParsingTests
     public void ParseWorktrees_DetachedHead_NoBranch()
     {
         var output = "worktree /home/user/repo\nHEAD abc123\ndetached\n";
-        var result = GitParsing.ParseWorktrees(output);
+        var result = Git.ParseWorktrees(output);
 
         Assert.IsInstanceOfType<Result<Worktree[]>.Ok>(result);
         var worktrees = ((Result<Worktree[]>.Ok)result).Value;

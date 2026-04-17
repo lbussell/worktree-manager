@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 Logan Bussell
 // SPDX-License-Identifier: MIT
 
-using CliWrap;
-using CliWrap.Buffered;
 using Spectre.Console;
 
 AnsiConsole.WriteLine();
@@ -21,19 +19,19 @@ await ChooseOne(menuOptions, o => o.Name)
 
 static async Task<Result<string>> ChooseBranch() =>
     await GetWorkingDirectory()
-        .BindAsync(GetGitBranches)
+        .BindAsync(Git.GetBranches)
         .Bind(branches => ChooseOne(branches, FormatBranchSpectreConsole, "Select a branch:"))
         .Map(branch => branch.Name);
 
 static async Task<Result<string>> ChooseWorktree() =>
     await GetWorkingDirectory()
-        .BindAsync(GetGitWorktrees)
+        .BindAsync(Git.GetWorktrees)
         .Bind(worktrees => ChooseOne(worktrees, FormatWorktree, "Select a worktree:"))
         .Map(wt => wt.Path);
 
 static async Task<Result<Branch[]>> ChooseBranches(string? title = null) =>
     await GetWorkingDirectory()
-        .BindAsync(GetGitBranches)
+        .BindAsync(Git.GetBranches)
         .Bind(branches =>
             ChooseOneOrMore(
                 branches.Where(b => !b.IsCurrent).ToArray(),
@@ -44,7 +42,7 @@ static async Task<Result<Branch[]>> ChooseBranches(string? title = null) =>
 
 static async Task<Result<Worktree[]>> ChooseWorktrees(string? title = null) =>
     await GetWorkingDirectory()
-        .BindAsync(GetGitWorktrees)
+        .BindAsync(Git.GetWorktrees)
         .Bind(worktrees =>
             ChooseOneOrMore(worktrees, FormatWorktree, title ?? "Select worktrees:")
         );
@@ -70,40 +68,10 @@ static async Task<Result<string>> CleanupWorktrees() =>
         .Map(names => $"Removed {names.Length} worktree(s): {string.Join(", ", names)}");
 
 static async Task<Result<string>> RemoveBranch(Branch branch) =>
-    await GetWorkingDirectory()
-        .BindAsync(async dir =>
-        {
-            try
-            {
-                await Cli.Wrap("git")
-                    .WithWorkingDirectory(dir)
-                    .WithArguments(["branch", "-d", branch.Name])
-                    .ExecuteBufferedAsync();
-                return Result<string>.Success(branch.Name);
-            }
-            catch (Exception ex)
-            {
-                return Result<string>.Failure($"{branch.Name}: {ex.Message}");
-            }
-        });
+    await GetWorkingDirectory().BindAsync(async dir => await Git.RemoveBranch(dir, branch));
 
 static async Task<Result<string>> RemoveWorktree(Worktree wt) =>
-    await GetWorkingDirectory()
-        .BindAsync(async dir =>
-        {
-            try
-            {
-                await Cli.Wrap("git")
-                    .WithWorkingDirectory(dir)
-                    .WithArguments(["worktree", "remove", wt.Path])
-                    .ExecuteBufferedAsync();
-                return Result<string>.Success(wt.Branch);
-            }
-            catch (Exception ex)
-            {
-                return Result<string>.Failure($"{wt.Branch}: {ex.Message}");
-            }
-        });
+    await GetWorkingDirectory().BindAsync(async dir => await Git.RemoveWorktree(dir, wt));
 
 static Result<string> GetWorkingDirectory()
 {
@@ -111,46 +79,6 @@ static Result<string> GetWorkingDirectory()
     return string.IsNullOrEmpty(dir)
         ? Result<string>.Failure("Could not determine working directory")
         : Result<string>.Success(dir);
-}
-
-static async Task<Result<Branch[]>> GetGitBranches(string workingDirectory)
-{
-    try
-    {
-        var result = await Cli.Wrap("git")
-            .WithWorkingDirectory(workingDirectory)
-            .WithArguments(
-                [
-                    "branch",
-                    "--sort=-committerdate",
-                    "--format=%(HEAD)|%(refname:short)|%(creatordate:relative)|%(subject)",
-                ]
-            )
-            .ExecuteBufferedAsync();
-
-        return GitParsing.ParseBranches(result.StandardOutput);
-    }
-    catch (Exception ex)
-    {
-        return Result<Branch[]>.Failure(ex.Message);
-    }
-}
-
-static async Task<Result<Worktree[]>> GetGitWorktrees(string workingDirectory)
-{
-    try
-    {
-        var result = await Cli.Wrap("git")
-            .WithWorkingDirectory(workingDirectory)
-            .WithArguments(["worktree", "list", "--porcelain"])
-            .ExecuteBufferedAsync();
-
-        return GitParsing.ParseWorktrees(result.StandardOutput);
-    }
-    catch (Exception ex)
-    {
-        return Result<Worktree[]>.Failure(ex.Message);
-    }
 }
 
 static Result<T> ChooseOne<T>(T[] choices, Func<T, string> displayConverter, string? title = null)
