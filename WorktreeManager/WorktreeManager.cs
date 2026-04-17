@@ -66,7 +66,7 @@ static string FormatWorkItem(WorkItem item)
     {
         parts.Add($"[blue]{Markup.Escape(wt.Path)}[/]");
         if (wt.IsDirty)
-            parts.Add("[yellow]\\[dirty][/]");
+            parts.Add("[yellow][[dirty]][/]");
     }
 
     if (item.PullRequest is { } pr)
