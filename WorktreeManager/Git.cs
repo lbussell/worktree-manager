@@ -12,12 +12,16 @@ public static class Git
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(line =>
             {
-                var parts = line.Split('|', 4);
+                var parts = line.Split('\t', 6);
+                var upstream = parts.Length > 3 ? parts[3] : "";
+                var track = parts.Length > 4 ? parts[4] : "";
                 return new Branch(
                     Name: parts[1],
                     IsCurrent: parts[0] == "*",
-                    LastCommit: parts[3],
-                    LastCommitDate: parts[2]
+                    LastCommit: parts.Length > 5 ? parts[5] : "",
+                    LastCommitDate: parts[2],
+                    Upstream: string.IsNullOrEmpty(upstream) ? null : upstream,
+                    UpstreamTrack: string.IsNullOrEmpty(track) ? null : track
                 );
             })
             .ToArray();
@@ -60,7 +64,7 @@ public static class Git
                     [
                         "branch",
                         "--sort=-committerdate",
-                        "--format=%(HEAD)|%(refname:short)|%(creatordate:relative)|%(subject)",
+                        $"--format=%(HEAD)\t%(refname:short)\t%(committerdate:relative)\t%(upstream:short)\t%(upstream:track)\t%(subject)",
                     ]
                 )
                 .ExecuteBufferedAsync();
@@ -88,6 +92,41 @@ public static class Git
         {
             return Result<Worktree[]>.Failure(ex.Message);
         }
+    }
+
+    public static async Task<bool> CheckDirtyState(string worktreePath)
+    {
+        try
+        {
+            var result = await Cli.Wrap("git")
+                .WithWorkingDirectory(worktreePath)
+                .WithArguments(["status", "--porcelain"])
+                .ExecuteBufferedAsync();
+            return !string.IsNullOrWhiteSpace(result.StandardOutput);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static async Task<Worktree[]> EnrichWithDirtyState(Worktree[] worktrees)
+    {
+        var semaphore = new SemaphoreSlim(4);
+        var tasks = worktrees.Select(async wt =>
+        {
+            await semaphore.WaitAsync();
+            try
+            {
+                var isDirty = await CheckDirtyState(wt.Path);
+                return wt with { IsDirty = isDirty };
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+        return await Task.WhenAll(tasks);
     }
 
     public static async Task<Result<string>> RemoveBranch(string workingDirectory, Branch branch)
@@ -119,6 +158,25 @@ public static class Git
         catch (Exception ex)
         {
             return Result<string>.Failure($"{wt.Branch}: {ex.Message}");
+        }
+    }
+
+    public static async Task<Result<string>> SwitchBranch(
+        string workingDirectory,
+        string branchName
+    )
+    {
+        try
+        {
+            await Cli.Wrap("git")
+                .WithWorkingDirectory(workingDirectory)
+                .WithArguments(["switch", branchName])
+                .ExecuteBufferedAsync();
+            return Result<string>.Success($"Switched to {branchName}");
+        }
+        catch (Exception ex)
+        {
+            return Result<string>.Failure(ex.Message);
         }
     }
 }

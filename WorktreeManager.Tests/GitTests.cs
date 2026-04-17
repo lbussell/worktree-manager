@@ -6,30 +6,38 @@ public sealed class GitTests
     [TestMethod]
     public void ParseBranches_SingleBranch()
     {
-        var output = "*|main|2 days ago|Initial commit\n";
+        var output = "*\tmain\t2 days ago\torigin/main\t[ahead 1]\tInitial commit\n";
         var result = Git.ParseBranches(output);
 
         Assert.IsInstanceOfType<Result<Branch[]>.Ok>(result);
         var branches = ((Result<Branch[]>.Ok)result).Value;
-        Assert.AreEqual(1, branches.Length);
+        Assert.HasCount(1, branches);
         Assert.AreEqual("main", branches[0].Name);
         Assert.IsTrue(branches[0].IsCurrent);
         Assert.AreEqual("Initial commit", branches[0].LastCommit);
         Assert.AreEqual("2 days ago", branches[0].LastCommitDate);
+        Assert.AreEqual("origin/main", branches[0].Upstream);
+        Assert.AreEqual("[ahead 1]", branches[0].UpstreamTrack);
     }
 
     [TestMethod]
     public void ParseBranches_MultipleBranches()
     {
-        var output = "*|main|2 days ago|Initial commit\n |feature|1 day ago|Add feature\n";
+        var output =
+            "*\tmain\t2 days ago\torigin/main\t\tInitial commit\n"
+            + " \tfeature\t1 day ago\t\t\tAdd feature\n";
         var result = Git.ParseBranches(output);
 
         Assert.IsInstanceOfType<Result<Branch[]>.Ok>(result);
         var branches = ((Result<Branch[]>.Ok)result).Value;
-        Assert.AreEqual(2, branches.Length);
+        Assert.HasCount(2, branches);
         Assert.IsTrue(branches[0].IsCurrent);
+        Assert.AreEqual("origin/main", branches[0].Upstream);
+        Assert.IsNull(branches[0].UpstreamTrack);
         Assert.IsFalse(branches[1].IsCurrent);
         Assert.AreEqual("feature", branches[1].Name);
+        Assert.IsNull(branches[1].Upstream);
+        Assert.IsNull(branches[1].UpstreamTrack);
     }
 
     [TestMethod]
@@ -43,12 +51,48 @@ public sealed class GitTests
     [TestMethod]
     public void ParseBranches_CommitMessageWithPipes()
     {
-        var output = " |fix|3 hours ago|Use a | b syntax\n";
+        var output = " \tfix\t3 hours ago\t\t\tUse a | b syntax\n";
         var result = Git.ParseBranches(output);
 
         Assert.IsInstanceOfType<Result<Branch[]>.Ok>(result);
         var branches = ((Result<Branch[]>.Ok)result).Value;
         Assert.AreEqual("Use a | b syntax", branches[0].LastCommit);
+    }
+
+    [TestMethod]
+    public void ParseBranches_UpstreamAheadAndBehind()
+    {
+        var output = " \tmain\t5 days ago\torigin/main\t[ahead 2, behind 3]\tSome commit\n";
+        var result = Git.ParseBranches(output);
+
+        Assert.IsInstanceOfType<Result<Branch[]>.Ok>(result);
+        var branches = ((Result<Branch[]>.Ok)result).Value;
+        Assert.AreEqual("origin/main", branches[0].Upstream);
+        Assert.AreEqual("[ahead 2, behind 3]", branches[0].UpstreamTrack);
+    }
+
+    [TestMethod]
+    public void ParseBranches_UpstreamGone()
+    {
+        var output = " \told-branch\t1 week ago\torigin/old-branch\t[gone]\tOld commit\n";
+        var result = Git.ParseBranches(output);
+
+        Assert.IsInstanceOfType<Result<Branch[]>.Ok>(result);
+        var branches = ((Result<Branch[]>.Ok)result).Value;
+        Assert.AreEqual("origin/old-branch", branches[0].Upstream);
+        Assert.AreEqual("[gone]", branches[0].UpstreamTrack);
+    }
+
+    [TestMethod]
+    public void ParseBranches_NoUpstream()
+    {
+        var output = " \tlocal-only\t2 hours ago\t\t\tLocal commit\n";
+        var result = Git.ParseBranches(output);
+
+        Assert.IsInstanceOfType<Result<Branch[]>.Ok>(result);
+        var branches = ((Result<Branch[]>.Ok)result).Value;
+        Assert.IsNull(branches[0].Upstream);
+        Assert.IsNull(branches[0].UpstreamTrack);
     }
 
     [TestMethod]
@@ -59,9 +103,10 @@ public sealed class GitTests
 
         Assert.IsInstanceOfType<Result<Worktree[]>.Ok>(result);
         var worktrees = ((Result<Worktree[]>.Ok)result).Value;
-        Assert.AreEqual(1, worktrees.Length);
+        Assert.HasCount(1, worktrees);
         Assert.AreEqual("/home/user/repo", worktrees[0].Path);
         Assert.AreEqual("main", worktrees[0].Branch);
+        Assert.IsFalse(worktrees[0].IsDirty);
     }
 
     [TestMethod]
@@ -74,7 +119,7 @@ public sealed class GitTests
 
         Assert.IsInstanceOfType<Result<Worktree[]>.Ok>(result);
         var worktrees = ((Result<Worktree[]>.Ok)result).Value;
-        Assert.AreEqual(2, worktrees.Length);
+        Assert.HasCount(2, worktrees);
         Assert.AreEqual("main", worktrees[0].Branch);
         Assert.AreEqual("feature", worktrees[1].Branch);
     }

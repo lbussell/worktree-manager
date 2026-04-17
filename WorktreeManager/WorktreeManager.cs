@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 Logan Bussell
 // SPDX-License-Identifier: MIT
 
+using CliWrap;
 using Spectre.Console;
 using static Interaction;
 
@@ -13,82 +14,212 @@ if (string.IsNullOrEmpty(pwd))
     return;
 }
 
-MenuOption[] menuOptions =
-[
-    new("Branches", ChooseBranch),
-    new("Worktrees", ChooseWorktree),
-    new("Cleanup", Cleanup),
-    new("Exit", () => Task.FromResult(Result<string>.Success("Exiting"))),
-];
+// Fetch branches, worktrees, and PRs concurrently
+var branchesTask = Git.GetBranches(pwd);
+var worktreesTask = Git.GetWorktrees(pwd);
+var prsTask = GitHub.GetPullRequests(pwd);
 
-await ChooseOne(menuOptions, o => o.Name)
-    .BindAsync(option => option.Action())
+var branchesResult = await branchesTask;
+if (branchesResult is Result<Branch[]>.Error(var err))
+{
+    PrintError(err);
+    return;
+}
+var branches = ((Result<Branch[]>.Ok)branchesResult).Value;
+
+var worktrees = (await worktreesTask).UnwrapOr([]);
+worktrees = await Git.EnrichWithDirtyState(worktrees);
+
+var prs = await prsTask;
+
+// Compose work items
+var workItems = WorkItem.Compose(branches, worktrees, prs);
+if (workItems.Length == 0)
+{
+    PrintError("No branches found");
+    return;
+}
+
+// Select a work item
+var selectedResult = ChooseOne(workItems, FormatWorkItem, "My Work:");
+if (selectedResult is Result<WorkItem>.Error)
+    return;
+var selected = ((Result<WorkItem>.Ok)selectedResult).Value;
+
+// Show context-aware actions
+var actions = BuildActions(pwd, selected);
+if (actions.Length == 0)
+    return;
+
+await ChooseOne(actions, a => a.Name, "Action:")
+    .BindAsync(a => a.Action())
     .Match(PrintOk, PrintError);
 
-async Task<Result<string>> ChooseBranch() =>
-    await Git.GetBranches(pwd)
-        .Bind(branches => ChooseOne(branches, FormatBranchSpectreConsole, "Select a branch:"))
-        .Map(branch => branch.Name);
+static string FormatWorkItem(WorkItem item)
+{
+    var parts = new List<string>();
 
-async Task<Result<string>> ChooseWorktree() =>
-    await Git.GetWorktrees(pwd)
-        .Bind(worktrees => ChooseOne(worktrees, FormatWorktree, "Select a worktree:"))
-        .Map(wt => wt.Path);
+    var marker = item.Branch.IsCurrent ? "[green]*[/]" : " ";
+    parts.Add($"{marker}[bold]{Markup.Escape(item.Branch.Name)}[/]");
 
-async Task<Result<Branch[]>> ChooseBranches(string? title = null) =>
-    await Git.GetBranches(pwd)
-        .Bind(branches =>
-            ChooseOneOrMore(
-                branches.Where(b => !b.IsCurrent).ToArray(),
-                FormatBranchSpectreConsole,
-                title ?? "Select branches:"
-            )
-        );
+    if (item.Worktree is { } wt)
+    {
+        parts.Add($"[blue]{Markup.Escape(wt.Path)}[/]");
+        if (wt.IsDirty)
+            parts.Add("[yellow]\\[dirty][/]");
+    }
 
-async Task<Result<Worktree[]>> ChooseWorktrees(string? title = null) =>
-    await Git.GetWorktrees(pwd)
-        .Bind(worktrees =>
-            ChooseOneOrMore(worktrees, FormatWorktree, title ?? "Select worktrees:")
-        );
+    if (item.PullRequest is { } pr)
+    {
+        var (color, label) = pr.State switch
+        {
+            PullRequestState.Open => ("green", "OPEN"),
+            PullRequestState.Merged => ("purple", "MERGED"),
+            PullRequestState.Closed => ("red", "CLOSED"),
+            _ => ("gray", "UNKNOWN"),
+        };
+        parts.Add($"[{color}]#{pr.Number} {Markup.Escape(pr.Title)} ({label})[/]");
+    }
 
-async Task<Result<string>> Cleanup() =>
-    await ChooseOne<MenuOption>(
-            [new("Branches", CleanupBranches), new("Worktrees", CleanupWorktrees)],
-            o => o.Name,
-            "Clean up:"
-        )
-        .BindAsync(option => option.Action());
+    if (item.Branch.UpstreamTrack is { } track)
+        parts.Add($"[gray]{Markup.Escape(track)}[/]");
+    else if (item.Branch.Upstream is not null)
+        parts.Add($"[gray]≡ {Markup.Escape(item.Branch.Upstream)}[/]");
 
-async Task<Result<string>> CleanupBranches() =>
-    await Git.GetBranches(pwd)
-        .Bind(branches =>
-            ChooseOneOrMore(
-                branches.Where(b => !b.IsCurrent).ToArray(),
-                FormatBranchSpectreConsole,
-                "Select branches to remove:"
-            )
-        )
-        .BindEach(branch => Git.RemoveBranch(pwd, branch))
-        .Sequence()
-        .Map(names => $"Removed {names.Length} branch(es): {string.Join(", ", names)}");
+    parts.Add($"[gray]{Markup.Escape(item.Branch.LastCommitDate)}[/]");
 
-async Task<Result<string>> CleanupWorktrees() =>
-    await Git.GetWorktrees(pwd)
-        .Bind(worktrees =>
-            ChooseOneOrMore(worktrees, FormatWorktree, "Select worktrees to remove:")
-        )
-        .BindEach(wt => Git.RemoveWorktree(pwd, wt))
-        .Sequence()
-        .Map(names => $"Removed {names.Length} worktree(s): {string.Join(", ", names)}");
+    return string.Join("  ", parts);
+}
 
-static string FormatBranchSpectreConsole(Branch b) =>
-    $"{(b.IsCurrent ? "*" : "")}({Markup.Escape(b.LastCommitDate)}) {Markup.Escape(b.Name)} [gray]{Spectre.Console.Markup.Escape(b.LastCommit)}[/]";
+static MenuOption[] BuildActions(string pwd, WorkItem item)
+{
+    var actions = new List<MenuOption>();
 
-static string FormatWorktree(Worktree wt) =>
-    $"{Markup.Escape(wt.Path)} [blue]{Markup.Escape(wt.Branch)}[/]";
+    actions.Add(new("Copy branch name", () => CopyToClipboard(item.Branch.Name)));
 
-public record Branch(string Name, bool IsCurrent, string LastCommit, string LastCommitDate);
+    if (item.Worktree is { } wt)
+    {
+        actions.Add(new("Copy worktree path", () => CopyToClipboard(wt.Path)));
+        actions.Add(new("Open in VS Code", () => RunCommand("code", wt.Path)));
+        actions.Add(new("Open in file browser", () => RunCommand("open", wt.Path)));
 
-public record Worktree(string Path, string Branch);
+        if (!item.Branch.IsCurrent)
+        {
+            actions.Add(new("Remove worktree (keep branch)", () => Git.RemoveWorktree(pwd, wt)));
+            actions.Add(
+                new(
+                    "Remove worktree + delete branch",
+                    async () =>
+                    {
+                        var removeResult = await Git.RemoveWorktree(pwd, wt);
+                        if (removeResult is Result<string>.Error)
+                            return removeResult;
+                        return await Git.RemoveBranch(pwd, item.Branch);
+                    }
+                )
+            );
+        }
+    }
+    else if (!item.Branch.IsCurrent)
+    {
+        actions.Add(new("Switch to branch", () => Git.SwitchBranch(pwd, item.Branch.Name)));
+    }
+
+    if (item.PullRequest is { } pr)
+    {
+        actions.Add(new("Open PR in browser", () => RunCommand("open", pr.Url)));
+        actions.Add(new("Copy PR URL", () => CopyToClipboard(pr.Url)));
+    }
+
+    if (!item.Branch.IsCurrent && item.Worktree is null)
+    {
+        actions.Add(new("Delete branch", () => Git.RemoveBranch(pwd, item.Branch)));
+    }
+
+    return [.. actions];
+}
+
+static async Task<Result<string>> CopyToClipboard(string text)
+{
+    try
+    {
+        await Cli.Wrap("pbcopy").WithStandardInputPipe(PipeSource.FromString(text)).ExecuteAsync();
+        return Result<string>.Success($"Copied: {text}");
+    }
+    catch (Exception ex)
+    {
+        return Result<string>.Failure(ex.Message);
+    }
+}
+
+static async Task<Result<string>> RunCommand(string app, string target)
+{
+    try
+    {
+        await Cli.Wrap(app).WithArguments([target]).ExecuteAsync();
+        return Result<string>.Success($"Opened: {target}");
+    }
+    catch (Exception ex)
+    {
+        return Result<string>.Failure(ex.Message);
+    }
+}
+
+public record Branch(
+    string Name,
+    bool IsCurrent,
+    string LastCommit,
+    string LastCommitDate,
+    string? Upstream = null,
+    string? UpstreamTrack = null
+);
+
+public record Worktree(string Path, string Branch, bool IsDirty = false);
+
+public enum PullRequestState
+{
+    Open,
+    Merged,
+    Closed,
+}
+
+public record PullRequest(
+    int Number,
+    string Title,
+    PullRequestState State,
+    string HeadBranch,
+    string Url
+);
+
+public record WorkItem(Branch Branch, Worktree? Worktree, PullRequest? PullRequest)
+{
+    public static WorkItem[] Compose(
+        Branch[] branches,
+        Worktree[] worktrees,
+        PullRequest[] pullRequests
+    )
+    {
+        var worktreeByBranch = worktrees
+            .Where(wt => !string.IsNullOrEmpty(wt.Branch))
+            .GroupBy(wt => wt.Branch)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        // When multiple PRs exist for the same branch, prefer the open one
+        var prByBranch = pullRequests
+            .GroupBy(pr => pr.HeadBranch)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderBy(pr => pr.State == PullRequestState.Open ? 0 : 1).First()
+            );
+
+        return branches
+            .Select(branch => new WorkItem(
+                Branch: branch,
+                Worktree: worktreeByBranch.GetValueOrDefault(branch.Name),
+                PullRequest: prByBranch.GetValueOrDefault(branch.Name)
+            ))
+            .ToArray();
+    }
+}
 
 public record MenuOption(string Name, Func<Task<Result<string>>> Action);
