@@ -10,7 +10,9 @@ artifacts_dir := "artifacts"
 publish_dir := artifacts_dir / "publish" / app / "release"
 install_dir := env("HOME") / ".local/bin"
 
-validate: build install
+test_project := "WorktreeManager.Tests/WorktreeManager.Tests.csproj"
+
+validate: build test install
 
 # Build the application
 build:
@@ -19,6 +21,10 @@ build:
 # Run the application
 run *args:
     dotnet run --project {{ project }} -- {{ args }}
+
+# Run the tests
+test:
+    dotnet test {{ test_project }}
 
 # Install the published binary to ~/.local/bin
 install: build
