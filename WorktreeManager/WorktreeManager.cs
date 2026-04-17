@@ -128,23 +128,7 @@ static async Task<Result<Branch[]>> GetGitBranches(string workingDirectory)
             )
             .ExecuteBufferedAsync();
 
-        var branches = result
-            .StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line =>
-            {
-                var parts = line.Split('|', 4);
-                return new Branch(
-                    Name: parts[1],
-                    IsCurrent: parts[0] == "*",
-                    LastCommit: parts[2],
-                    LastCommitDate: parts[3]
-                );
-            })
-            .ToArray();
-
-        return branches.Length == 0
-            ? Result<Branch[]>.Failure("No branches found")
-            : Result<Branch[]>.Success(branches);
+        return GitParsing.ParseBranches(result.StandardOutput);
     }
     catch (Exception ex)
     {
@@ -161,25 +145,7 @@ static async Task<Result<Worktree[]>> GetGitWorktrees(string workingDirectory)
             .WithArguments(["worktree", "list", "--porcelain"])
             .ExecuteBufferedAsync();
 
-        var worktrees = result
-            .StandardOutput.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
-            .Select(block =>
-            {
-                var lines = block.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                var path =
-                    lines.FirstOrDefault(l => l.StartsWith("worktree "))?["worktree ".Length..]
-                    ?? "";
-                var branch =
-                    lines.FirstOrDefault(l => l.StartsWith("branch "))?["branch ".Length..] ?? "";
-                if (branch.StartsWith("refs/heads/"))
-                    branch = branch["refs/heads/".Length..];
-                return new Worktree(path, branch);
-            })
-            .ToArray();
-
-        return worktrees.Length == 0
-            ? Result<Worktree[]>.Failure("No worktrees found")
-            : Result<Worktree[]>.Success(worktrees);
+        return GitParsing.ParseWorktrees(result.StandardOutput);
     }
     catch (Exception ex)
     {
