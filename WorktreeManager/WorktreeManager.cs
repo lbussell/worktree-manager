@@ -123,7 +123,7 @@ static async Task<Result<Branch[]>> GetGitBranches(string workingDirectory)
                 [
                     "branch",
                     "--sort=-committerdate",
-                    "--format=%(HEAD)|%(refname:short)|%(subject)|%(creatordate:relative)",
+                    "--format=%(HEAD)|%(refname:short)|%(creatordate:relative)|%(subject)",
                 ]
             )
             .ExecuteBufferedAsync();

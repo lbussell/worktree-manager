@@ -6,7 +6,7 @@ public sealed class GitParsingTests
     [TestMethod]
     public void ParseBranches_SingleBranch()
     {
-        var output = "*|main|Initial commit|2 days ago\n";
+        var output = "*|main|2 days ago|Initial commit\n";
         var result = GitParsing.ParseBranches(output);
 
         Assert.IsInstanceOfType<Result<Branch[]>.Ok>(result);
@@ -21,7 +21,7 @@ public sealed class GitParsingTests
     [TestMethod]
     public void ParseBranches_MultipleBranches()
     {
-        var output = "*|main|Initial commit|2 days ago\n |feature|Add feature|1 day ago\n";
+        var output = "*|main|2 days ago|Initial commit\n |feature|1 day ago|Add feature\n";
         var result = GitParsing.ParseBranches(output);
 
         Assert.IsInstanceOfType<Result<Branch[]>.Ok>(result);
@@ -38,6 +38,17 @@ public sealed class GitParsingTests
         var result = GitParsing.ParseBranches("");
         Assert.IsInstanceOfType<Result<Branch[]>.Error>(result);
         Assert.AreEqual("No branches found", ((Result<Branch[]>.Error)result).Message);
+    }
+
+    [TestMethod]
+    public void ParseBranches_CommitMessageWithPipes()
+    {
+        var output = " |fix|3 hours ago|Use a | b syntax\n";
+        var result = GitParsing.ParseBranches(output);
+
+        Assert.IsInstanceOfType<Result<Branch[]>.Ok>(result);
+        var branches = ((Result<Branch[]>.Ok)result).Value;
+        Assert.AreEqual("Use a | b syntax", branches[0].LastCommit);
     }
 
     [TestMethod]

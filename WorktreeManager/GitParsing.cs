@@ -13,8 +13,8 @@ public static class GitParsing
                 return new Branch(
                     Name: parts[1],
                     IsCurrent: parts[0] == "*",
-                    LastCommit: parts[2],
-                    LastCommitDate: parts[3]
+                    LastCommit: parts[3],
+                    LastCommitDate: parts[2]
                 );
             })
             .ToArray();
