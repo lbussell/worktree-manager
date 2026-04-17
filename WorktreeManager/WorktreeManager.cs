@@ -65,7 +65,7 @@ static string FormatWorkItem(WorkItem item)
 
     if (item.Worktree is { } wt)
     {
-        parts.Add($"[blue]{Markup.Escape(wt.Path)}[/]");
+        parts.Add($"[blue]{Markup.Escape(ShortenPath(wt.Path))}[/]");
         if (wt.IsDirty)
             parts.Add("[yellow][[dirty]][/]");
     }
@@ -164,6 +164,12 @@ static async Task<Result<string>> RunCommand(string app, string target)
     {
         return Result<string>.Failure(ex.Message);
     }
+}
+
+static string ShortenPath(string path)
+{
+    var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    return !string.IsNullOrEmpty(home) && path.StartsWith(home) ? "~" + path[home.Length..] : path;
 }
 
 public record Branch(

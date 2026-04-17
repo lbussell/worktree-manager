@@ -12,7 +12,11 @@ install_dir := env("HOME") / ".local/bin"
 
 test_project := "WorktreeManager.Tests/WorktreeManager.Tests.csproj"
 
-validate: build test install
+validate: format build test install
+
+# Run CSharpier formatter via dotnet build
+format:
+    dotnet build
 
 # Build the application
 build:
