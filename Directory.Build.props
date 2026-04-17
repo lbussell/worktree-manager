@@ -1,5 +1,9 @@
 <Project>
 
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="CSharpier.MsBuild" Version="0.*" />
   </ItemGroup>
