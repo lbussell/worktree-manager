@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PublishAot>true</PublishAot>
+    <PackAsTool>true</PackAsTool>
+    <UserSecretsId>WorktreeManager-9d7205bff972dbc7c430f9eebd8a0cb53679353bedcace65e2adc7216314e9ae</UserSecretsId>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Spectre.Console" Version="0.*" />
+    <PackageReference Include="CliWrap" Version="3.*" />
+  </ItemGroup>
+
+</Project>
