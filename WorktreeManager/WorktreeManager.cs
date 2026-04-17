@@ -6,8 +6,8 @@ using static Interaction;
 
 AnsiConsole.WriteLine();
 
-var dir = Directory.GetCurrentDirectory();
-if (string.IsNullOrEmpty(dir))
+var pwd = Directory.GetCurrentDirectory();
+if (string.IsNullOrEmpty(pwd))
 {
     PrintError("Could not determine working directory");
     return;
@@ -26,17 +26,17 @@ await ChooseOne(menuOptions, o => o.Name)
     .Match(PrintOk, PrintError);
 
 async Task<Result<string>> ChooseBranch() =>
-    await Git.GetBranches(dir)
+    await Git.GetBranches(pwd)
         .Bind(branches => ChooseOne(branches, FormatBranchSpectreConsole, "Select a branch:"))
         .Map(branch => branch.Name);
 
 async Task<Result<string>> ChooseWorktree() =>
-    await Git.GetWorktrees(dir)
+    await Git.GetWorktrees(pwd)
         .Bind(worktrees => ChooseOne(worktrees, FormatWorktree, "Select a worktree:"))
         .Map(wt => wt.Path);
 
 async Task<Result<Branch[]>> ChooseBranches(string? title = null) =>
-    await Git.GetBranches(dir)
+    await Git.GetBranches(pwd)
         .Bind(branches =>
             ChooseOneOrMore(
                 branches.Where(b => !b.IsCurrent).ToArray(),
@@ -46,7 +46,7 @@ async Task<Result<Branch[]>> ChooseBranches(string? title = null) =>
         );
 
 async Task<Result<Worktree[]>> ChooseWorktrees(string? title = null) =>
-    await Git.GetWorktrees(dir)
+    await Git.GetWorktrees(pwd)
         .Bind(worktrees =>
             ChooseOneOrMore(worktrees, FormatWorktree, title ?? "Select worktrees:")
         );
@@ -60,7 +60,7 @@ async Task<Result<string>> Cleanup() =>
         .BindAsync(option => option.Action());
 
 async Task<Result<string>> CleanupBranches() =>
-    await Git.GetBranches(dir)
+    await Git.GetBranches(pwd)
         .Bind(branches =>
             ChooseOneOrMore(
                 branches.Where(b => !b.IsCurrent).ToArray(),
@@ -68,16 +68,16 @@ async Task<Result<string>> CleanupBranches() =>
                 "Select branches to remove:"
             )
         )
-        .BindEach(branch => Git.RemoveBranch(dir, branch))
+        .BindEach(branch => Git.RemoveBranch(pwd, branch))
         .Sequence()
         .Map(names => $"Removed {names.Length} branch(es): {string.Join(", ", names)}");
 
 async Task<Result<string>> CleanupWorktrees() =>
-    await Git.GetWorktrees(dir)
+    await Git.GetWorktrees(pwd)
         .Bind(worktrees =>
             ChooseOneOrMore(worktrees, FormatWorktree, "Select worktrees to remove:")
         )
-        .BindEach(wt => Git.RemoveWorktree(dir, wt))
+        .BindEach(wt => Git.RemoveWorktree(pwd, wt))
         .Sequence()
         .Map(names => $"Removed {names.Length} worktree(s): {string.Join(", ", names)}");
 
