@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 using Spectre.Console;
+using static Interaction;
 
 AnsiConsole.WriteLine();
 
@@ -81,54 +82,11 @@ static Result<string> GetWorkingDirectory()
         : Result<string>.Success(dir);
 }
 
-static Result<T> ChooseOne<T>(T[] choices, Func<T, string> displayConverter, string? title = null)
-    where T : notnull
-{
-    if (choices.Length == 0)
-        return Result<T>.Failure("No choices available");
-
-    var prompt = new SelectionPrompt<T>().UseConverter(displayConverter).AddChoices(choices);
-
-    if (!string.IsNullOrEmpty(title))
-        prompt.Title(title);
-
-    var selected = AnsiConsole.Prompt(prompt);
-
-    return Result<T>.Success(selected);
-}
-
-static Result<T[]> ChooseOneOrMore<T>(
-    T[] choices,
-    Func<T, string> displayConverter,
-    string? title = null
-)
-    where T : notnull
-{
-    if (choices.Length == 0)
-        return Result<T[]>.Failure("No choices available");
-
-    var prompt = new MultiSelectionPrompt<T>().UseConverter(displayConverter).AddChoices(choices);
-
-    if (!string.IsNullOrEmpty(title))
-        prompt.Title(title);
-
-    var selected = AnsiConsole.Prompt(prompt);
-
-    return selected.Count == 0
-        ? Result<T[]>.Failure("Nothing selected")
-        : Result<T[]>.Success([.. selected]);
-}
-
 static string FormatBranchSpectreConsole(Branch b) =>
     $"{(b.IsCurrent ? "*" : "")}({Markup.Escape(b.LastCommitDate)}) {Markup.Escape(b.Name)} [gray]{Spectre.Console.Markup.Escape(b.LastCommit)}[/]";
 
 static string FormatWorktree(Worktree wt) =>
     $"{Markup.Escape(wt.Path)} [blue]{Markup.Escape(wt.Branch)}[/]";
-
-static void PrintOk(string result) => AnsiConsole.MarkupLineInterpolated($"[green]OK[/]: {result}");
-
-static void PrintError(string message) =>
-    AnsiConsole.MarkupLineInterpolated($"[red]Error[/]: {message}");
 
 public record Branch(string Name, bool IsCurrent, string LastCommit, string LastCommitDate);
 
