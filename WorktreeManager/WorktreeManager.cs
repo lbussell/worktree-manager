@@ -57,22 +57,32 @@ static async Task<Result<string>> Cleanup() =>
         .BindAsync(option => option.Action());
 
 static async Task<Result<string>> CleanupBranches() =>
-    await ChooseBranches("Select branches to remove:")
-        .BindEach(RemoveBranch)
-        .Sequence()
-        .Map(names => $"Removed {names.Length} branch(es): {string.Join(", ", names)}");
+    await GetWorkingDirectory()
+        .BindAsync(async dir =>
+            await Git.GetBranches(dir)
+                .Bind(branches =>
+                    ChooseOneOrMore(
+                        branches.Where(b => !b.IsCurrent).ToArray(),
+                        FormatBranchSpectreConsole,
+                        "Select branches to remove:"
+                    )
+                )
+                .BindEach(branch => Git.RemoveBranch(dir, branch))
+                .Sequence()
+                .Map(names => $"Removed {names.Length} branch(es): {string.Join(", ", names)}")
+        );
 
 static async Task<Result<string>> CleanupWorktrees() =>
-    await ChooseWorktrees("Select worktrees to remove:")
-        .BindEach(RemoveWorktree)
-        .Sequence()
-        .Map(names => $"Removed {names.Length} worktree(s): {string.Join(", ", names)}");
-
-static async Task<Result<string>> RemoveBranch(Branch branch) =>
-    await GetWorkingDirectory().BindAsync(async dir => await Git.RemoveBranch(dir, branch));
-
-static async Task<Result<string>> RemoveWorktree(Worktree wt) =>
-    await GetWorkingDirectory().BindAsync(async dir => await Git.RemoveWorktree(dir, wt));
+    await GetWorkingDirectory()
+        .BindAsync(async dir =>
+            await Git.GetWorktrees(dir)
+                .Bind(worktrees =>
+                    ChooseOneOrMore(worktrees, FormatWorktree, "Select worktrees to remove:")
+                )
+                .BindEach(wt => Git.RemoveWorktree(dir, wt))
+                .Sequence()
+                .Map(names => $"Removed {names.Length} worktree(s): {string.Join(", ", names)}")
+        );
 
 static Result<string> GetWorkingDirectory()
 {
