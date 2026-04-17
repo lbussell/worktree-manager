@@ -60,7 +60,8 @@ static string FormatWorkItem(WorkItem item)
     var parts = new List<string>();
 
     var marker = item.Branch.IsCurrent ? "[green]*[/]" : " ";
-    parts.Add($"{marker}[bold]{Markup.Escape(item.Branch.Name)}[/]");
+    parts.Add($"{marker}[gray]({Markup.Escape(item.Branch.LastCommitDate)})[/]");
+    parts.Add($"[bold]{Markup.Escape(item.Branch.Name)}[/]");
 
     if (item.Worktree is { } wt)
     {
@@ -85,8 +86,6 @@ static string FormatWorkItem(WorkItem item)
         parts.Add($"[gray]{Markup.Escape(track)}[/]");
     else if (item.Branch.Upstream is not null)
         parts.Add($"[gray]≡ {Markup.Escape(item.Branch.Upstream)}[/]");
-
-    parts.Add($"[gray]{Markup.Escape(item.Branch.LastCommitDate)}[/]");
 
     return string.Join("  ", parts);
 }
