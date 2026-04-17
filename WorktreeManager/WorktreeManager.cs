@@ -136,6 +136,8 @@ static MenuOption[] BuildActions(string pwd, WorkItem item)
         actions.Add(new("Delete branch", () => Git.RemoveBranch(pwd, item.Branch)));
     }
 
+    actions.Add(new("Exit", () => Task.FromResult(Result<string>.Success("Exiting"))));
+
     return [.. actions];
 }
 
