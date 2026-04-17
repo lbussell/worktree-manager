@@ -8,6 +8,7 @@ using static Interaction;
 AnsiConsole.WriteLine();
 
 var pwd = Directory.GetCurrentDirectory();
+var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 if (string.IsNullOrEmpty(pwd))
 {
     PrintError("Could not determine working directory");
@@ -55,7 +56,7 @@ await ChooseOne(actions, a => a.Name, "Action:")
     .BindAsync(a => a.Action())
     .Match(PrintOk, PrintError);
 
-static string FormatWorkItem(WorkItem item)
+string FormatWorkItem(WorkItem item)
 {
     var parts = new List<string>();
 
@@ -166,9 +167,8 @@ static async Task<Result<string>> RunCommand(string app, string target)
     }
 }
 
-static string ShortenPath(string path)
+string ShortenPath(string path)
 {
-    var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     return !string.IsNullOrEmpty(home) && path.StartsWith(home) ? "~" + path[home.Length..] : path;
 }
 
