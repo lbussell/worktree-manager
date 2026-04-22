@@ -1,4 +1,2 @@
 <Solution>
-  <Project Path="WorktreeManager.Tests/WorktreeManager.Tests.csproj" />
-  <Project Path="WorktreeManager/WorktreeManager.csproj" />
 </Solution>
