@@ -1,2 +1,5 @@
 <Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WorktreeManager/WorktreeManager.fsproj" />
+  </Folder>
 </Solution>
