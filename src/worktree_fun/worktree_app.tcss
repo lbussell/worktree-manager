@@ -11,16 +11,21 @@ ListItem {
     height: auto;
 }
 
+.worktree-header {
+    height: auto;
+}
+
 .worktree-name {
     text-style: bold;
 }
 
-.worktree-branch {
-    color: $accent;
-}
-
 .worktree-path {
     color: $text-muted;
+    margin-left: 1;
+}
+
+.worktree-branch {
+    color: $accent;
 }
 
 .branch-item {

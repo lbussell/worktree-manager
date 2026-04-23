@@ -12,6 +12,7 @@ from pygit2.enums import (
     BranchType,
 )
 from textual.containers import (
+    Horizontal,
     Vertical,
 )
 from textual.widgets import (
@@ -267,9 +268,12 @@ def load_worktree_views(repo: pygit2.Repository) -> list[WorktreeView]:
 def render_worktree(worktree: WorktreeView) -> ListItem:
     return ListItem(
         Vertical(
-            Label(worktree.name, classes="worktree-name"),
+            Horizontal(
+                Label(worktree.name, classes="worktree-name"),
+                Static(worktree.display_path, classes="worktree-path"),
+                classes="worktree-header",
+            ),
             Static("Branch: " + worktree.branch, classes="worktree-branch"),
-            Static("Path: " + worktree.display_path, classes="worktree-path"),
             classes="worktree-item",
         ),
         name=worktree.path,
