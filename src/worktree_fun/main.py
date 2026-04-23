@@ -11,6 +11,7 @@ from typing import (
 
 import pygit2
 from textual import (
+    events,
     work,
 )
 from textual.app import (
@@ -32,7 +33,40 @@ from textual.widgets import (
     Static,
     TabbedContent,
     TabPane,
+    Tabs,
 )
+
+
+class VimListView(ListView):
+    def move_to_first_item(self) -> None:
+        for index, item in enumerate(self._nodes):
+            if not item.disabled:
+                self.index = index
+                return
+
+    def move_to_last_item(self) -> None:
+        for index in range(len(self._nodes) - 1, -1, -1):
+            if not self._nodes[index].disabled:
+                self.index = index
+                return
+
+    def on_key(self, event: events.Key) -> None:
+        if event.character is None:
+            return
+
+        match event.character:
+            case "j" | "J":
+                self.action_cursor_down()
+                event.stop()
+            case "k" | "K":
+                self.action_cursor_up()
+                event.stop()
+            case "g":
+                self.move_to_first_item()
+                event.stop()
+            case "G":
+                self.move_to_last_item()
+                event.stop()
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +160,8 @@ class WorktreeApp(App):
     """
 
     BINDINGS = [
+        ("h", "previous_tab", "Previous tab"),
+        ("l", "next_tab", "Next tab"),
         ("q", "quit", "Quit"),
     ]
 
@@ -136,9 +172,9 @@ class WorktreeApp(App):
         yield Header()
         with TabbedContent(initial="worktrees-pane"):
             with TabPane("Worktrees", id="worktrees-pane"):
-                yield ListView(id="worktrees")
+                yield VimListView(id="worktrees")
             with TabPane("Pull Requests", id="pull-requests-pane"):
-                yield Lazy(ListView(id="pull-requests"))
+                yield Lazy(VimListView(id="pull-requests"))
         yield Footer()
 
     def on_mount(self) -> None:
@@ -147,11 +183,22 @@ class WorktreeApp(App):
         self.pull_requests_loading = False
         self.log("Mounting worktree app", cwd=os.getcwd())
         self.populate_worktrees()
+        self.query_one("#worktrees", VimListView).focus()
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         if event.pane.id == "pull-requests-pane":
             self.populate_pull_requests()
+            self.query_one("#pull-requests", VimListView).focus()
             return
+
+        if event.pane.id == "worktrees-pane":
+            self.query_one("#worktrees", VimListView).focus()
+
+    def action_previous_tab(self) -> None:
+        self.query_one(Tabs).action_previous_tab()
+
+    def action_next_tab(self) -> None:
+        self.query_one(Tabs).action_next_tab()
 
     def get_repository_branch(self, repo: pygit2.Repository) -> str:
         if repo.head_is_detached:
