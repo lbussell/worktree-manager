@@ -1,4 +1,8 @@
 import os
+from dataclasses import (
+    asdict,
+    dataclass,
+)
 
 import pygit2
 
@@ -17,6 +21,13 @@ from textual.widgets import (
     ListView,
     Static,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class WorktreeView:
+    name: str
+    branch: str
+    path: str
 
 
 class WorktreeApp(App):
@@ -77,11 +88,18 @@ class WorktreeApp(App):
 
         return worktree_repo.head.shorthand
 
-    def render_worktree(self, worktree, branch: str) -> ListItem:
+    def build_worktree_view(self, worktree) -> WorktreeView:
+        return WorktreeView(
+            name=worktree.name,
+            branch=self.get_worktree_branch(worktree),
+            path=worktree.path,
+        )
+
+    def render_worktree(self, worktree: WorktreeView) -> ListItem:
         return ListItem(
             Vertical(
                 Label(worktree.name, classes="worktree-name"),
-                Static("Branch: " + branch, classes="worktree-branch"),
+                Static("Branch: " + worktree.branch, classes="worktree-branch"),
                 Static("Path: " + worktree.path, classes="worktree-path"),
                 classes="worktree-item",
             ),
@@ -109,22 +127,14 @@ class WorktreeApp(App):
         list_view.clear()
 
         # Populate the list
-        worktree_details = []
-        for worktree in worktree_infos:
-            branch = self.get_worktree_branch(worktree)
-            worktree_details.append(
-                {
-                    "name": worktree.name,
-                    "branch": branch,
-                    "path": worktree.path,
-                }
-            )
-            list_view.append(self.render_worktree(worktree, branch))
+        worktree_views = [self.build_worktree_view(worktree) for worktree in worktree_infos]
+        for worktree in worktree_views:
+            list_view.append(self.render_worktree(worktree))
 
         self.log(
             "Prepared worktree view",
-            count=len(worktree_details),
-            worktrees=worktree_details,
+            count=len(worktree_views),
+            worktrees=[asdict(worktree) for worktree in worktree_views],
         )
         list_view.focus()
 
