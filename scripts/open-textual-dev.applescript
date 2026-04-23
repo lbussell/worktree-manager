@@ -32,7 +32,7 @@ on run argv
         
         delay 1
         
-        input text "uv run textual run --dev -c wt" to leftTerminal
+        input text "uv run textual run --dev src/worktree_fun/main.py" to leftTerminal
         send key "enter" to leftTerminal
         
         focus leftTerminal

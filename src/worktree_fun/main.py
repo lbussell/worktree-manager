@@ -57,6 +57,7 @@ class WorktreeApp(App):
 
     def on_mount(self) -> None:
         self.title = "worktree fun"
+        self.log("Mounting worktree app", cwd=os.getcwd())
         self.populate()
 
     def get_worktree_branch(self, worktree) -> str:
@@ -76,9 +77,7 @@ class WorktreeApp(App):
 
         return worktree_repo.head.shorthand
 
-    def render_worktree(self, worktree) -> ListItem:
-        branch = self.get_worktree_branch(worktree)
-
+    def render_worktree(self, worktree, branch: str) -> ListItem:
         return ListItem(
             Vertical(
                 Label(worktree.name, classes="worktree-name"),
@@ -94,10 +93,12 @@ class WorktreeApp(App):
         cwd = os.getcwd()
         repo_path = pygit2.discover_repository(cwd)
         if repo_path is None:
+            self.log("Unable to discover repository", cwd=cwd)
             self.exit(message=f"Not inside a git repository: {cwd}")
             return
 
         repo = pygit2.Repository(repo_path)
+        self.log("Repository discovered", workdir=repo.workdir, git_dir=repo.path)
 
         # Get details for all worktrees
         worktree_names = repo.list_worktrees()
@@ -108,8 +109,23 @@ class WorktreeApp(App):
         list_view.clear()
 
         # Populate the list
+        worktree_details = []
         for worktree in worktree_infos:
-            list_view.append(self.render_worktree(worktree))
+            branch = self.get_worktree_branch(worktree)
+            worktree_details.append(
+                {
+                    "name": worktree.name,
+                    "branch": branch,
+                    "path": worktree.path,
+                }
+            )
+            list_view.append(self.render_worktree(worktree, branch))
+
+        self.log(
+            "Prepared worktree view",
+            count=len(worktree_details),
+            worktrees=worktree_details,
+        )
         list_view.focus()
 
 
