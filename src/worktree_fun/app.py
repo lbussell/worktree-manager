@@ -272,18 +272,19 @@ class WorktreeApp(App):
         self.worktrees_by_path = {worktree.path: worktree for worktree in worktree_views}
 
         list_view = self.query_one("#worktrees", VimListView)
-        list_view.clear()
+        with self.batch_update():
+            list_view.clear()
 
-        highlight_index: int | None = None
-        for index, worktree in enumerate(worktree_views):
-            list_view.append(render_worktree(worktree))
-            if worktree.path == highlight_path:
-                highlight_index = index
+            highlight_index: int | None = None
+            for index, worktree in enumerate(worktree_views):
+                list_view.append(render_worktree(worktree))
+                if worktree.path == highlight_path:
+                    highlight_index = index
 
-        if highlight_index is not None:
-            list_view.index = highlight_index
-        elif worktree_views:
-            list_view.index = 0
+            if highlight_index is not None:
+                list_view.index = highlight_index
+            elif worktree_views:
+                list_view.index = 0
 
         self.log(
             "Prepared worktree view",
@@ -322,14 +323,15 @@ class WorktreeApp(App):
         branches: list[BranchView],
     ) -> None:
         list_view = self.query_one("#branches", VimListView)
-        list_view.clear()
+        with self.batch_update():
+            list_view.clear()
 
-        if not branches:
-            list_view.append(render_branch_message("No local branches found."))
-        else:
-            list_view.extend(
-                render_branch(branch) for branch in branches
-            )
+            if not branches:
+                list_view.append(render_branch_message("No local branches found."))
+            else:
+                list_view.extend(
+                    render_branch(branch) for branch in branches
+                )
 
         self.log(
             "Prepared branch view",
@@ -379,14 +381,15 @@ class WorktreeApp(App):
         pull_requests: list[PullRequestListView],
     ) -> None:
         list_view = self.query_one("#pull-requests", VimListView)
-        list_view.clear()
+        with self.batch_update():
+            list_view.clear()
 
-        if not pull_requests:
-            list_view.append(render_pull_request_message("No pull requests found."))
-        else:
-            list_view.extend(
-                render_pull_request(pull_request) for pull_request in pull_requests
-            )
+            if not pull_requests:
+                list_view.append(render_pull_request_message("No pull requests found."))
+            else:
+                list_view.extend(
+                    render_pull_request(pull_request) for pull_request in pull_requests
+                )
 
         self.log(
             "Prepared pull request view",
