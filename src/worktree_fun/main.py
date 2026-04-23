@@ -33,9 +33,15 @@ from worktree_fun.vim_list_view import (
 from worktree_fun.worktrees import (
     CreateWorktreeModal,
     CreateWorktreeRequest,
+    DeleteWorktreeModal,
+    DeleteWorktreeRequest,
+    DeleteWorktreeResult,
+    ForceDeleteBranchModal,
+    ForceDeleteBranchRequiredError,
     WorktreeDetailsModal,
     WorktreeView,
     create_worktree,
+    delete_worktree,
     discover_repository,
     load_worktree_views,
     render_worktree,
@@ -47,6 +53,7 @@ class WorktreeApp(App):
 
     BINDINGS = [
         ("c", "create_worktree", "Create worktree"),
+        ("d", "delete_worktree", "Delete worktree"),
         ("h", "previous_tab", "Previous tab"),
         ("l", "next_tab", "Next tab"),
         ("q", "quit", "Quit"),
@@ -129,6 +136,88 @@ class WorktreeApp(App):
             title="Worktree created",
         )
 
+    def get_selected_worktree(self) -> WorktreeView | None:
+        highlighted_item = self.query_one("#worktrees", VimListView).highlighted_child
+        if highlighted_item is None or highlighted_item.name is None:
+            return None
+
+        return self.worktrees_by_path.get(highlighted_item.name)
+
+    def action_delete_worktree(self) -> None:
+        if self.query_one(TabbedContent).active != "worktrees-pane":
+            return
+
+        if self.focused != self.query_one("#worktrees", VimListView):
+            return
+
+        worktree = self.get_selected_worktree()
+        if worktree is None:
+            return
+
+        if not worktree.is_linked:
+            self.notify(
+                "The current worktree can't be deleted from this list.",
+                title="Can't delete worktree",
+                severity="warning",
+            )
+            return
+
+        self.push_screen(DeleteWorktreeModal(worktree), self.handle_delete_worktree_request)
+
+    def handle_delete_worktree_request(
+        self,
+        request: DeleteWorktreeRequest | None,
+    ) -> None:
+        if request is None:
+            return
+
+        self.delete_selected_worktree(request)
+
+    def confirm_force_delete_branch(
+        self,
+        request: DeleteWorktreeRequest,
+        reason: str,
+    ) -> None:
+        self.push_screen(
+            ForceDeleteBranchModal(request, reason),
+            self.handle_force_delete_branch_request,
+        )
+
+    def handle_force_delete_branch_request(
+        self,
+        request: DeleteWorktreeRequest | None,
+    ) -> None:
+        self.query_one("#worktrees", VimListView).focus()
+        if request is None:
+            return
+
+        self.delete_selected_worktree(request)
+
+    def show_deleted_worktree(self, result: DeleteWorktreeResult) -> None:
+        self.populate_worktrees()
+        self.query_one("#worktrees", VimListView).focus()
+
+        message = "Deleted " + result.name + " at " + result.display_path
+        if result.deleted_branch_name is not None:
+            if result.deleted_branch_was_forced:
+                message += " and force deleted branch " + result.deleted_branch_name
+            else:
+                message += " and deleted branch " + result.deleted_branch_name
+        elif result.branch_already_absent_name is not None:
+            message += ". Branch " + result.branch_already_absent_name + " was already absent"
+
+        self.notify(message, title="Worktree deleted")
+
+    def show_delete_worktree_error(self, message: str) -> None:
+        self.populate_worktrees()
+        self.query_one("#worktrees", VimListView).focus()
+        self.notify(
+            message,
+            title="Unable to delete worktree",
+            severity="error",
+            timeout=10,
+        )
+
     def action_previous_tab(self) -> None:
         self.query_one(Tabs).action_previous_tab()
 
@@ -174,6 +263,8 @@ class WorktreeApp(App):
 
         if highlight_index is not None:
             list_view.index = highlight_index
+        elif worktree_views:
+            list_view.index = 0
 
         self.log(
             "Prepared worktree view",
@@ -251,6 +342,30 @@ class WorktreeApp(App):
         self.pull_requests_loading = True
         self.show_pull_request_message("Loading pull requests...")
         self.load_pull_requests()
+
+    @work(
+        thread=True,
+        exclusive=True,
+        group="delete-worktree",
+        exit_on_error=False,
+    )
+    def delete_selected_worktree(self, request: DeleteWorktreeRequest) -> None:
+        cwd = os.getcwd()
+        try:
+            repo = discover_repository(cwd)
+            result = delete_worktree(repo, request)
+        except ForceDeleteBranchRequiredError as error:
+            self.call_from_thread(
+                self.confirm_force_delete_branch,
+                request,
+                str(error),
+            )
+            return
+        except (ValueError, OSError) as error:
+            self.call_from_thread(self.show_delete_worktree_error, str(error))
+            return
+
+        self.call_from_thread(self.show_deleted_worktree, result)
 
 
 def main() -> None:

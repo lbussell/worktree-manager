@@ -109,3 +109,72 @@ CreateWorktreeModal {
     height: auto;
     margin-top: 1;
 }
+
+DeleteWorktreeModal {
+    align: center middle;
+}
+
+#delete-worktree-dialog {
+    width: 72;
+    max-width: 90%;
+    height: auto;
+    border: round $accent;
+    background: $surface;
+    padding: 1 2;
+}
+
+.delete-worktree-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.delete-worktree-field {
+    margin-bottom: 1;
+}
+
+.delete-worktree-help {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+.delete-worktree-buttons {
+    height: auto;
+    margin-top: 1;
+}
+
+ForceDeleteBranchModal {
+    align: center middle;
+}
+
+#force-delete-branch-dialog {
+    width: 72;
+    max-width: 90%;
+    height: auto;
+    border: round $error;
+    background: $surface;
+    padding: 1 2;
+}
+
+.force-delete-branch-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.force-delete-branch-warning {
+    color: $error;
+    margin-bottom: 1;
+}
+
+.force-delete-branch-field {
+    margin-bottom: 1;
+}
+
+.force-delete-branch-help {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+.force-delete-branch-buttons {
+    height: auto;
+    margin-top: 1;
+}

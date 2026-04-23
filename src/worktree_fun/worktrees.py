@@ -1,6 +1,7 @@
 import hashlib
 import os
 import re
+import shutil
 from dataclasses import (
     dataclass,
 )
@@ -46,10 +47,20 @@ class WorktreeView:
     name: str
     branch: str
     path: str
+    linked_worktree_name: str | None = None
+    local_branch_name: str | None = None
 
     @property
     def display_path(self) -> str:
         return shorten_home_path(self.path)
+
+    @property
+    def is_linked(self) -> bool:
+        return self.linked_worktree_name is not None
+
+    @property
+    def can_delete_branch(self) -> bool:
+        return self.local_branch_name is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +70,47 @@ class CreateWorktreeRequest:
     existing_branch_name: str | None = None
     remote_name: str | None = None
     base_branch_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteWorktreeRequest:
+    name: str
+    path: str
+    linked_worktree_name: str
+    delete_branch: bool
+    branch_name: str | None = None
+    force_delete_branch: bool = False
+
+    @property
+    def display_path(self) -> str:
+        return shorten_home_path(self.path)
+
+    def with_force_delete_branch(self) -> "DeleteWorktreeRequest":
+        return DeleteWorktreeRequest(
+            name=self.name,
+            path=self.path,
+            linked_worktree_name=self.linked_worktree_name,
+            delete_branch=self.delete_branch,
+            branch_name=self.branch_name,
+            force_delete_branch=True,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteWorktreeResult:
+    name: str
+    path: str
+    deleted_branch_name: str | None = None
+    deleted_branch_was_forced: bool = False
+    branch_already_absent_name: str | None = None
+
+    @property
+    def display_path(self) -> str:
+        return shorten_home_path(self.path)
+
+
+class ForceDeleteBranchRequiredError(ValueError):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,6 +470,136 @@ class CreateWorktreeModal(ModalScreen[CreateWorktreeRequest | None]):
         )
 
 
+class DeleteWorktreeModal(ModalScreen[DeleteWorktreeRequest | None]):
+    BINDINGS = [
+        ("escape", "cancel_dialog", "Cancel"),
+    ]
+
+    def __init__(self, worktree: WorktreeView) -> None:
+        if worktree.linked_worktree_name is None:
+            raise ValueError("Only linked worktrees can be deleted.")
+
+        super().__init__()
+        self.worktree = worktree
+
+    def compose(self) -> ComposeResult:
+        delete_branch_help = (
+            "Also delete the local branch after the worktree is removed."
+            if self.worktree.can_delete_branch
+            else "This worktree is not on a local branch, so the branch can't be deleted."
+        )
+        yield Vertical(
+            Label("Delete Worktree", classes="delete-worktree-title"),
+            Static("Name: " + self.worktree.name, classes="delete-worktree-field"),
+            Static("Branch: " + self.worktree.branch, classes="delete-worktree-field"),
+            Static(
+                "Path: " + self.worktree.display_path,
+                classes="delete-worktree-field",
+            ),
+            Checkbox(
+                "Delete branch as well",
+                value=False,
+                disabled=not self.worktree.can_delete_branch,
+                id="delete-worktree-delete-branch",
+            ),
+            Static(delete_branch_help, classes="delete-worktree-help"),
+            Horizontal(
+                Button("Cancel", id="cancel-delete-worktree"),
+                Button(
+                    "Delete",
+                    id="submit-delete-worktree",
+                    variant="error",
+                ),
+                classes="delete-worktree-buttons",
+            ),
+            id="delete-worktree-dialog",
+        )
+
+    def on_mount(self) -> None:
+        self.query_one("#cancel-delete-worktree", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-delete-worktree":
+            self.dismiss(None)
+            return
+
+        if event.button.id == "submit-delete-worktree":
+            delete_branch = self.query_one(
+                "#delete-worktree-delete-branch",
+                Checkbox,
+            ).value
+            self.dismiss(
+                DeleteWorktreeRequest(
+                    name=self.worktree.name,
+                    path=self.worktree.path,
+                    linked_worktree_name=self.worktree.linked_worktree_name,
+                    delete_branch=delete_branch,
+                    branch_name=self.worktree.local_branch_name,
+                )
+            )
+
+    def action_cancel_dialog(self) -> None:
+        self.dismiss(None)
+
+
+class ForceDeleteBranchModal(ModalScreen[DeleteWorktreeRequest | None]):
+    BINDINGS = [
+        ("escape", "cancel_dialog", "Cancel"),
+    ]
+
+    def __init__(self, request: DeleteWorktreeRequest, reason: str) -> None:
+        super().__init__()
+        self.request = request
+        self.reason = reason
+
+    def compose(self) -> ComposeResult:
+        branch_name = self.request.branch_name or "(unknown branch)"
+        yield Vertical(
+            Label("Force Delete Branch", classes="force-delete-branch-title"),
+            Static(self.reason, classes="force-delete-branch-warning"),
+            Static(
+                "Worktree: " + self.request.name,
+                classes="force-delete-branch-field",
+            ),
+            Static(
+                "Branch: " + branch_name,
+                classes="force-delete-branch-field",
+            ),
+            Static(
+                "Path: " + self.request.display_path,
+                classes="force-delete-branch-field",
+            ),
+            Static(
+                "This will delete the worktree and then force delete the branch.",
+                classes="force-delete-branch-help",
+            ),
+            Horizontal(
+                Button("Cancel", id="cancel-force-delete-branch"),
+                Button(
+                    "Force Delete",
+                    id="submit-force-delete-branch",
+                    variant="error",
+                ),
+                classes="force-delete-branch-buttons",
+            ),
+            id="force-delete-branch-dialog",
+        )
+
+    def on_mount(self) -> None:
+        self.query_one("#cancel-force-delete-branch", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-force-delete-branch":
+            self.dismiss(None)
+            return
+
+        if event.button.id == "submit-force-delete-branch":
+            self.dismiss(self.request.with_force_delete_branch())
+
+    def action_cancel_dialog(self) -> None:
+        self.dismiss(None)
+
+
 def shorten_home_path(path: str) -> str:
     home = os.path.normpath(os.path.expanduser("~"))
     normalized_path = os.path.normpath(path)
@@ -516,26 +698,39 @@ def discover_repository(cwd: str) -> pygit2.Repository:
     return pygit2.Repository(repo_path)
 
 
-def get_repository_branch(repo: pygit2.Repository) -> str:
-    if repo.head_is_detached:
-        return "(detached HEAD)"
-    if repo.head_is_unborn:
-        return "(unborn branch)"
-
-    return repo.head.shorthand
-
-
-def get_worktree_branch(worktree) -> str:
-    repo_path = pygit2.discover_repository(worktree.path)
+def open_repository_at_path(path: str) -> pygit2.Repository | None:
+    repo_path = pygit2.discover_repository(path)
     if repo_path is None:
-        return "(unknown branch)"
+        return None
 
     try:
-        worktree_repo = pygit2.Repository(repo_path)
+        return pygit2.Repository(repo_path)
     except pygit2.GitError:
-        return "(unknown branch)"
+        return None
 
-    return get_repository_branch(worktree_repo)
+
+def get_repository_branch_details(repo: pygit2.Repository) -> tuple[str, str | None]:
+    if repo.head_is_detached:
+        return "(detached HEAD)", None
+    if repo.head_is_unborn:
+        return "(unborn branch)", None
+
+    branch_name = repo.head.shorthand
+    local_branch = repo.lookup_branch(branch_name, BranchType.LOCAL)
+    return branch_name, branch_name if local_branch is not None else None
+
+
+def get_repository_branch(repo: pygit2.Repository) -> str:
+    branch_name, _local_branch_name = get_repository_branch_details(repo)
+    return branch_name
+
+
+def get_worktree_branch_details(worktree) -> tuple[str, str | None]:
+    worktree_repo = open_repository_at_path(worktree.path)
+    if worktree_repo is None:
+        return "(unknown branch)", None
+
+    return get_repository_branch_details(worktree_repo)
 
 
 def get_worktree_name(path: str) -> str:
@@ -546,18 +741,23 @@ def get_worktree_name(path: str) -> str:
 def build_current_worktree_view(repo: pygit2.Repository) -> WorktreeView:
     path = os.path.normpath(repo.workdir or repo.path)
     default_name = get_worktree_name(path)
+    branch_name, local_branch_name = get_repository_branch_details(repo)
     return WorktreeView(
         name=get_worktree_display_name(repo, path, default_name),
-        branch=get_repository_branch(repo),
+        branch=branch_name,
         path=path,
+        local_branch_name=local_branch_name,
     )
 
 
 def build_worktree_view(repo: pygit2.Repository, worktree) -> WorktreeView:
+    branch_name, local_branch_name = get_worktree_branch_details(worktree)
     return WorktreeView(
         name=get_worktree_display_name(repo, worktree.path, worktree.name),
-        branch=get_worktree_branch(worktree),
+        branch=branch_name,
         path=os.path.normpath(worktree.path),
+        linked_worktree_name=worktree.name,
+        local_branch_name=local_branch_name,
     )
 
 
@@ -674,6 +874,150 @@ def render_worktree(worktree: WorktreeView) -> ListItem:
             classes="worktree-item",
         ),
         name=worktree.path,
+    )
+
+
+def ensure_worktree_is_clean(path: Path) -> None:
+    worktree_repo = open_repository_at_path(str(path))
+    if worktree_repo is None:
+        raise ValueError(
+            "Unable to inspect worktree state at " + shorten_home_path(str(path))
+        )
+
+    if worktree_repo.status():
+        raise ValueError(
+            "Worktree has uncommitted changes at "
+            + shorten_home_path(str(path))
+            + ". Commit, stash, or clean it before deleting."
+        )
+
+
+def get_branch_delete_base(
+    repo: pygit2.Repository,
+    branch: pygit2.Branch,
+) -> tuple[str, pygit2.Oid] | None:
+    try:
+        upstream = branch.upstream
+    except pygit2.GitError as error:
+        raise ValueError(
+            f"Unable to determine the upstream for branch {branch.shorthand}: {error}"
+        ) from error
+
+    if upstream is not None and upstream.target is not None:
+        return upstream.shorthand, upstream.target
+
+    if repo.head_is_detached or repo.head_is_unborn or repo.head.target is None:
+        return None
+
+    return repo.head.shorthand, repo.head.target
+
+
+def ensure_branch_can_be_deleted(
+    repo: pygit2.Repository,
+    branch: pygit2.Branch,
+) -> None:
+    if branch.target is None:
+        raise ValueError(f"Branch {branch.shorthand} does not point to a commit.")
+
+    delete_base = get_branch_delete_base(repo, branch)
+    if delete_base is None:
+        raise ForceDeleteBranchRequiredError(
+            "Git couldn't determine whether branch "
+            + branch.shorthand
+            + " is safely merged. Force delete it only if you're sure you don't need that branch history."
+        )
+
+    base_name, base_target = delete_base
+    if branch.target == base_target or repo.descendant_of(base_target, branch.target):
+        return
+
+    raise ForceDeleteBranchRequiredError(
+        "Branch "
+        + branch.shorthand
+        + " is not fully merged into "
+        + base_name
+        + ". Force delete it only if you're sure you don't need that branch history."
+    )
+
+
+def delete_worktree(
+    repo: pygit2.Repository,
+    request: DeleteWorktreeRequest,
+) -> DeleteWorktreeResult:
+    if request.linked_worktree_name not in repo.list_worktrees():
+        raise ValueError(f"Worktree not found: {request.name}")
+
+    worktree = repo.lookup_worktree(request.linked_worktree_name)
+    worktree_path = Path(request.path)
+
+    branch = None
+    if request.delete_branch:
+        if request.branch_name is None:
+            raise ValueError(
+                "This worktree is not on a local branch, so the branch can't be deleted."
+            )
+
+        branch = repo.lookup_branch(request.branch_name, BranchType.LOCAL)
+        if branch is not None and not request.force_delete_branch:
+            ensure_branch_can_be_deleted(repo, branch)
+
+    if worktree_path.exists():
+        if not worktree_path.is_dir():
+            raise ValueError(
+                "Worktree path is not a directory: "
+                + shorten_home_path(str(worktree_path))
+            )
+
+        ensure_worktree_is_clean(worktree_path)
+        try:
+            shutil.rmtree(worktree_path)
+        except OSError as error:
+            raise ValueError(
+                "Unable to remove worktree directory "
+                + shorten_home_path(str(worktree_path))
+                + f": {error}"
+            ) from error
+    elif not worktree.is_prunable:
+        raise ValueError(
+            "Worktree path is missing, but Git won't prune it yet: "
+            + shorten_home_path(str(worktree_path))
+        )
+
+    try:
+        worktree.prune()
+    except pygit2.GitError as error:
+        raise ValueError(f"Unable to prune worktree {request.name}: {error}") from error
+
+    deleted_branch_name = None
+    branch_already_absent_name = None
+    if request.delete_branch:
+        if request.branch_name is None:
+            raise ValueError(
+                "This worktree is not on a local branch, so the branch can't be deleted."
+            )
+
+        if branch is None:
+            branch_already_absent_name = request.branch_name
+        else:
+            try:
+                branch.delete()
+            except pygit2.GitError as error:
+                raise ValueError(
+                    "Deleted worktree "
+                    + request.name
+                    + " at "
+                    + shorten_home_path(str(worktree_path))
+                    + f", but unable to delete branch {request.branch_name}: {error}"
+                ) from error
+            deleted_branch_name = request.branch_name
+
+    invalidate_create_worktree_branch_options_cache(repo)
+    return DeleteWorktreeResult(
+        name=request.name,
+        path=str(worktree_path),
+        deleted_branch_name=deleted_branch_name,
+        deleted_branch_was_forced=request.force_delete_branch and deleted_branch_name is not None,
+        branch_already_absent_name=branch_already_absent_name,
     )
 
 
