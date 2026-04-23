@@ -22,6 +22,12 @@ from textual.widgets import (
     Tabs,
 )
 
+from worktree_fun.branches import (
+    BranchView,
+    load_branch_views,
+    render_branch,
+    render_branch_message,
+)
 from worktree_fun.git_ops import (
     create_worktree,
     delete_worktree,
@@ -66,6 +72,8 @@ class WorktreeApp(App):
 
     pull_requests_loaded: bool
     pull_requests_loading: bool
+    branches_loaded: bool
+    branches_loading: bool
     worktrees_by_path: dict[str, WorktreeView]
 
     def compose(self) -> ComposeResult:
@@ -73,6 +81,8 @@ class WorktreeApp(App):
         with TabbedContent(initial="worktrees-pane"):
             with TabPane("Worktrees", id="worktrees-pane"):
                 yield VimListView(id="worktrees")
+            with TabPane("Branches", id="branches-pane"):
+                yield Lazy(VimListView(id="branches"))
             with TabPane("Pull Requests", id="pull-requests-pane"):
                 yield Lazy(VimListView(id="pull-requests"))
         yield Footer()
@@ -81,12 +91,19 @@ class WorktreeApp(App):
         self.title = "worktree fun"
         self.pull_requests_loaded = False
         self.pull_requests_loading = False
+        self.branches_loaded = False
+        self.branches_loading = False
         self.worktrees_by_path = {}
         self.log("Mounting worktree app", cwd=os.getcwd())
         self.populate_worktrees()
         self.query_one("#worktrees", VimListView).focus()
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        if event.pane.id == "branches-pane":
+            self.populate_branches()
+            self.query_one("#branches", VimListView).focus()
+            return
+
         if event.pane.id == "pull-requests-pane":
             self.populate_pull_requests()
             self.query_one("#pull-requests", VimListView).focus()
@@ -276,6 +293,63 @@ class WorktreeApp(App):
             count=len(worktree_views),
             worktrees=[asdict(worktree) for worktree in worktree_views],
         )
+
+    def show_branch_message(self, message: str) -> None:
+        list_view = self.query_one("#branches", VimListView)
+        list_view.clear()
+        list_view.append(render_branch_message(message))
+
+    def show_loaded_branches(
+        self,
+        branches: list[BranchView],
+    ) -> None:
+        list_view = self.query_one("#branches", VimListView)
+        list_view.clear()
+
+        if not branches:
+            list_view.append(render_branch_message("No local branches found."))
+        else:
+            list_view.extend(
+                render_branch(branch) for branch in branches
+            )
+
+        self.log(
+            "Prepared branch view",
+            count=len(branches),
+            branches=[asdict(branch) for branch in branches],
+        )
+        self.branches_loaded = True
+        self.branches_loading = False
+
+    def show_branch_load_error(self, message: str) -> None:
+        self.show_branch_message("Unable to load branches: " + message)
+        self.branches_loading = False
+        self.log("Unable to load branches", error=message)
+
+    @work(
+        thread=True,
+        exclusive=True,
+        group="branches",
+        exit_on_error=False,
+    )
+    def load_branches(self) -> None:
+        cwd = os.getcwd()
+        try:
+            repo = discover_repository(cwd)
+            branches = load_branch_views(repo)
+        except (ValueError, OSError) as error:
+            self.call_from_thread(self.show_branch_load_error, str(error))
+            return
+
+        self.call_from_thread(self.show_loaded_branches, branches)
+
+    def populate_branches(self) -> None:
+        if self.branches_loaded or self.branches_loading:
+            return
+
+        self.branches_loading = True
+        self.show_branch_message("Loading branches...")
+        self.load_branches()
 
     def show_pull_request_message(self, message: str) -> None:
         list_view = self.query_one("#pull-requests", VimListView)

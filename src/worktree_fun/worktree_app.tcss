@@ -23,6 +23,26 @@ ListItem {
     color: $text-muted;
 }
 
+.branch-item {
+    height: auto;
+}
+
+.branch-name {
+    text-style: bold;
+}
+
+.branch-time {
+    color: $text-muted;
+}
+
+.branch-upstream {
+    color: $accent;
+}
+
+.branch-message {
+    color: $text-muted;
+}
+
 .pull-request-item {
     height: auto;
 }
