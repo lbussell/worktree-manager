@@ -29,6 +29,18 @@ class WorktreeView:
     branch: str
     path: str
 
+    @property
+    def display_path(self) -> str:
+        home = os.path.normpath(os.path.expanduser("~"))
+        if self.path == home:
+            return "~"
+
+        home_prefix = home + os.sep
+        if self.path.startswith(home_prefix):
+            return "~" + self.path[len(home) :]
+
+        return self.path
+
 
 class WorktreeApp(App):
     CSS = """
@@ -115,7 +127,7 @@ class WorktreeApp(App):
             Vertical(
                 Label(worktree.name, classes="worktree-name"),
                 Static("Branch: " + worktree.branch, classes="worktree-branch"),
-                Static("Path: " + worktree.path, classes="worktree-path"),
+                Static("Path: " + worktree.display_path, classes="worktree-path"),
                 classes="worktree-item",
             ),
             name=worktree.path,
