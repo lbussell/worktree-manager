@@ -262,16 +262,13 @@ class WorktreeApp(App):
         self.push_screen(WorktreeDetailsModal(worktree))
 
     def populate_worktrees(self, highlight_path: str | None = None) -> None:
-        cwd = os.getcwd()
-        try:
-            repo = discover_repository(cwd)
-        except ValueError as error:
-            self.log("Unable to discover repository", cwd=cwd)
-            self.exit(message=str(error))
-            return
+        self.load_worktrees(highlight_path)
 
-        self.log("Repository discovered", workdir=repo.workdir, git_dir=repo.path)
-        worktree_views = load_worktree_views(repo)
+    def show_loaded_worktrees(
+        self,
+        worktree_views: list[WorktreeView],
+        highlight_path: str | None = None,
+    ) -> None:
         self.worktrees_by_path = {worktree.path: worktree for worktree in worktree_views}
 
         list_view = self.query_one("#worktrees", VimListView)
@@ -293,6 +290,27 @@ class WorktreeApp(App):
             count=len(worktree_views),
             worktrees=[asdict(worktree) for worktree in worktree_views],
         )
+
+    def show_worktree_load_error(self, message: str) -> None:
+        self.log("Unable to load worktrees", error=message)
+        self.exit(message=message)
+
+    @work(
+        thread=True,
+        exclusive=True,
+        group="worktrees",
+        exit_on_error=False,
+    )
+    def load_worktrees(self, highlight_path: str | None = None) -> None:
+        cwd = os.getcwd()
+        try:
+            repo = discover_repository(cwd)
+            worktree_views = load_worktree_views(repo)
+        except (ValueError, OSError) as error:
+            self.call_from_thread(self.show_worktree_load_error, str(error))
+            return
+
+        self.call_from_thread(self.show_loaded_worktrees, worktree_views, highlight_path)
 
     def show_branch_message(self, message: str) -> None:
         list_view = self.query_one("#branches", VimListView)
