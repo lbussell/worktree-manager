@@ -3,7 +3,6 @@ import os
 import subprocess
 from dataclasses import (
     asdict,
-    dataclass,
 )
 from typing import (
     Literal,
@@ -11,7 +10,6 @@ from typing import (
 
 import pygit2
 from textual import (
-    events,
     work,
 )
 from textual.app import (
@@ -35,82 +33,15 @@ from textual.widgets import (
     TabPane,
     Tabs,
 )
-
-
-class VimListView(ListView):
-    def move_to_first_item(self) -> None:
-        for index, item in enumerate(self._nodes):
-            if not item.disabled:
-                self.index = index
-                return
-
-    def move_to_last_item(self) -> None:
-        for index in range(len(self._nodes) - 1, -1, -1):
-            if not self._nodes[index].disabled:
-                self.index = index
-                return
-
-    def on_key(self, event: events.Key) -> None:
-        if event.character is None:
-            return
-
-        match event.character:
-            case "j" | "J":
-                self.action_cursor_down()
-                event.stop()
-            case "k" | "K":
-                self.action_cursor_up()
-                event.stop()
-            case "g":
-                self.move_to_first_item()
-                event.stop()
-            case "G":
-                self.move_to_last_item()
-                event.stop()
-
-
-@dataclass(frozen=True, slots=True)
-class WorktreeView:
-    name: str
-    branch: str
-    path: str
-
-    @property
-    def display_path(self) -> str:
-        home = os.path.normpath(os.path.expanduser("~"))
-        if self.path == home:
-            return "~"
-
-        home_prefix = home + os.sep
-        if self.path.startswith(home_prefix):
-            return "~" + self.path[len(home) :]
-
-        return self.path
-
-
-@dataclass(frozen=True, slots=True)
-class PullRequestListView:
-    number: int
-    title: str
-    branch: str
-    remote: str | None
-    status: Literal["Open", "Merged", "Closed"]
-    is_draft_mode: bool
-
-    @property
-    def branch_display(self) -> str:
-        if self.remote is None:
-            return self.branch
-
-        return f"{self.remote}/{self.branch}"
-
-    @property
-    def status_display(self) -> str:
-        if self.is_draft_mode:
-            return f"{self.status} | Draft"
-
-        return self.status
-
+from worktree_fun.pull_request_list_view import (
+    PullRequestListView,
+)
+from worktree_fun.vim_list_view import (
+    VimListView,
+)
+from worktree_fun.worktree_view import (
+    WorktreeView,
+)
 
 class WorktreeApp(App):
     CSS = """
