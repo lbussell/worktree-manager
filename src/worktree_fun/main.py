@@ -1,4 +1,6 @@
+import json
 import os
+import subprocess
 from dataclasses import (
     asdict,
     dataclass,
@@ -8,16 +10,18 @@ from typing import (
 )
 
 import pygit2
-
+from textual import (
+    work,
+)
 from textual.app import (
     App,
     ComposeResult,
 )
-from textual.lazy import (
-    Lazy,
-)
 from textual.containers import (
     Vertical,
+)
+from textual.lazy import (
+    Lazy,
 )
 from textual.widgets import (
     Footer,
@@ -115,6 +119,10 @@ class WorktreeApp(App):
     .pull-request-status {
         color: $text-muted;
     }
+
+    .pull-request-message {
+        color: $text-muted;
+    }
     """
 
     BINDINGS = [
@@ -122,6 +130,7 @@ class WorktreeApp(App):
     ]
 
     pull_requests_loaded: bool
+    pull_requests_loading: bool
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -135,6 +144,7 @@ class WorktreeApp(App):
     def on_mount(self) -> None:
         self.title = "worktree fun"
         self.pull_requests_loaded = False
+        self.pull_requests_loading = False
         self.log("Mounting worktree app", cwd=os.getcwd())
         self.populate_worktrees()
 
@@ -193,32 +203,102 @@ class WorktreeApp(App):
             name=worktree.path,
         )
 
+    def get_pull_request_state(
+        self,
+        state: str,
+    ) -> Literal["Open", "Merged", "Closed"]:
+        state_map: dict[str, Literal["Open", "Merged", "Closed"]] = {
+            "OPEN": "Open",
+            "MERGED": "Merged",
+            "CLOSED": "Closed",
+        }
+        if state not in state_map:
+            raise ValueError(f"Unsupported pull request state: {state}")
+
+        return state_map[state]
+
+    def build_pull_request_list_view(
+        self,
+        pull_request_data: dict[str, object],
+    ) -> PullRequestListView:
+        number = pull_request_data.get("number")
+        if not isinstance(number, int):
+            raise ValueError(f"Expected integer pull request number, got: {number!r}")
+
+        title = pull_request_data.get("title")
+        if not isinstance(title, str):
+            raise ValueError(f"Expected string pull request title, got: {title!r}")
+
+        branch = pull_request_data.get("headRefName")
+        if not isinstance(branch, str):
+            raise ValueError(f"Expected string pull request branch, got: {branch!r}")
+
+        is_draft_mode = pull_request_data.get("isDraft")
+        if not isinstance(is_draft_mode, bool):
+            raise ValueError(
+                f"Expected boolean pull request draft mode, got: {is_draft_mode!r}"
+            )
+
+        state = pull_request_data.get("state")
+        if not isinstance(state, str):
+            raise ValueError(f"Expected string pull request state, got: {state!r}")
+
+        remote: str | None = None
+        remote_data = pull_request_data.get("headRepositoryOwner")
+        if remote_data is not None:
+            if not isinstance(remote_data, dict):
+                raise ValueError(
+                    "Expected pull request remote owner data to be an object, "
+                    f"got: {remote_data!r}"
+                )
+
+            remote_login = remote_data.get("login")
+            if remote_login is None:
+                remote = None
+            elif isinstance(remote_login, str):
+                remote = remote_login
+            else:
+                raise ValueError(
+                    "Expected pull request remote owner login to be a string, "
+                    f"got: {remote_login!r}"
+                )
+
+        return PullRequestListView(
+            number=number,
+            title=title,
+            branch=branch,
+            remote=remote,
+            status=self.get_pull_request_state(state),
+            is_draft_mode=is_draft_mode,
+        )
+
     def load_pull_request_list_views(self) -> list[PullRequestListView]:
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--state",
+                "all",
+                "--limit",
+                "100",
+                "--json",
+                "number,title,headRefName,isDraft,state,headRepositoryOwner",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        pull_request_data = json.loads(result.stdout)
+        if not isinstance(pull_request_data, list):
+            raise ValueError(
+                "Expected gh pr list JSON output to be a list, "
+                f"got: {pull_request_data!r}"
+            )
+
         return [
-            PullRequestListView(
-                number=142,
-                title="Add pull request list tab",
-                branch="feature/pull-request-tab",
-                remote="origin",
-                status="Open",
-                is_draft_mode=True,
-            ),
-            PullRequestListView(
-                number=137,
-                title="Include current repo in worktree list",
-                branch="dev",
-                remote="origin",
-                status="Merged",
-                is_draft_mode=False,
-            ),
-            PullRequestListView(
-                number=128,
-                title="Experiment with worktree browser",
-                branch="spike/worktree-browser",
-                remote=None,
-                status="Closed",
-                is_draft_mode=False,
-            ),
+            self.build_pull_request_list_view(pull_request)
+            for pull_request in pull_request_data
         ]
 
     def render_pull_request(self, pull_request: PullRequestListView) -> ListItem:
@@ -241,8 +321,13 @@ class WorktreeApp(App):
             name=str(pull_request.number),
         )
 
+    def render_pull_request_message(self, message: str) -> ListItem:
+        return ListItem(
+            Static(message, classes="pull-request-message"),
+            disabled=True,
+        )
+
     def populate_worktrees(self) -> None:
-        # Find the repo
         cwd = os.getcwd()
         repo_path = pygit2.discover_repository(cwd)
         if repo_path is None:
@@ -253,15 +338,12 @@ class WorktreeApp(App):
         repo = pygit2.Repository(repo_path)
         self.log("Repository discovered", workdir=repo.workdir, git_dir=repo.path)
 
-        # Get details for all worktrees
         worktree_names = repo.list_worktrees()
         worktree_infos = [repo.lookup_worktree(w) for w in worktree_names]
 
-        # Get the list object
         list_view = self.query_one("#worktrees", ListView)
         list_view.clear()
 
-        # Populate the list
         worktree_views = [self.build_current_worktree_view(repo)]
         seen_paths = {worktree_views[0].path}
         for worktree in worktree_infos:
@@ -280,18 +362,25 @@ class WorktreeApp(App):
             count=len(worktree_views),
             worktrees=[asdict(worktree) for worktree in worktree_views],
         )
-        list_view.focus()
 
-    def populate_pull_requests(self) -> None:
-        if self.pull_requests_loaded:
-            return
+    def show_pull_request_message(self, message: str) -> None:
+        list_view = self.query_one("#pull-requests", ListView)
+        list_view.clear()
+        list_view.append(self.render_pull_request_message(message))
 
+    def show_loaded_pull_requests(
+        self,
+        pull_requests: list[PullRequestListView],
+    ) -> None:
         list_view = self.query_one("#pull-requests", ListView)
         list_view.clear()
 
-        pull_requests = self.load_pull_request_list_views()
-        for pull_request in pull_requests:
-            list_view.append(self.render_pull_request(pull_request))
+        if not pull_requests:
+            list_view.append(self.render_pull_request_message("No pull requests found."))
+        else:
+            list_view.extend(
+                self.render_pull_request(pull_request) for pull_request in pull_requests
+            )
 
         self.log(
             "Prepared pull request view",
@@ -299,6 +388,51 @@ class WorktreeApp(App):
             pull_requests=[asdict(pull_request) for pull_request in pull_requests],
         )
         self.pull_requests_loaded = True
+        self.pull_requests_loading = False
+
+    def show_pull_request_load_error(self, message: str) -> None:
+        self.show_pull_request_message("Unable to load pull requests: " + message)
+        self.pull_requests_loading = False
+        self.log("Unable to load pull requests", error=message)
+
+    @work(
+        thread=True,
+        exclusive=True,
+        group="pull-requests",
+        exit_on_error=False,
+    )
+    def load_pull_requests(self) -> None:
+        try:
+            pull_requests = self.load_pull_request_list_views()
+        except FileNotFoundError as error:
+            self.call_from_thread(
+                self.show_pull_request_load_error,
+                f"`gh` command not found: {error}",
+            )
+            return
+        except subprocess.CalledProcessError as error:
+            error_message = error.stderr.strip() or error.stdout.strip() or str(error)
+            self.call_from_thread(self.show_pull_request_load_error, error_message)
+            return
+        except json.JSONDecodeError as error:
+            self.call_from_thread(
+                self.show_pull_request_load_error,
+                f"Invalid JSON from gh: {error.msg}",
+            )
+            return
+        except ValueError as error:
+            self.call_from_thread(self.show_pull_request_load_error, str(error))
+            return
+
+        self.call_from_thread(self.show_loaded_pull_requests, pull_requests)
+
+    def populate_pull_requests(self) -> None:
+        if self.pull_requests_loaded or self.pull_requests_loading:
+            return
+
+        self.pull_requests_loading = True
+        self.show_pull_request_message("Loading pull requests...")
+        self.load_pull_requests()
 
 
 def main() -> None:
