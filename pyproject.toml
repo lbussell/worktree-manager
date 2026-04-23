@@ -1,0 +1,18 @@
+[project]
+name = "worktree-fun"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "pygit2>=1.19.2",
+    "textual>=8.2.4",
+]
+
+[project.scripts]
+wt = "worktree_fun.main:main"
+
+[dependency-groups]
+dev = [
+    "textual-dev>=1.8.0",
+]
