@@ -9,6 +9,7 @@ ListItem {
 
 .worktree-item {
     height: auto;
+    padding: 1 0;
 }
 
 .worktree-header {
