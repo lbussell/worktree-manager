@@ -7,7 +7,7 @@ ListItem {
     padding: 0 1;
 }
 
-.worktree-item {
+.list-item-container {
     height: auto;
     padding: 1 0;
 }
@@ -29,11 +29,6 @@ ListItem {
     color: $accent;
 }
 
-.branch-item {
-    height: auto;
-    padding: 1 0;
-}
-
 .branch-name {
     text-style: bold;
 }
@@ -48,11 +43,6 @@ ListItem {
 
 .branch-message {
     color: $text-muted;
-}
-
-.pull-request-item {
-    height: auto;
-    padding: 1 0;
 }
 
 .pull-request-title {

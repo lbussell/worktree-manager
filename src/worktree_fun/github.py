@@ -154,7 +154,7 @@ def render_pull_request(pull_request: PullRequestListView) -> ListItem:
                 "Status: " + pull_request.status_display,
                 classes="pull-request-status",
             ),
-            classes="pull-request-item",
+            classes="pull-request-item list-item-container",
         ),
         name=str(pull_request.number),
     )

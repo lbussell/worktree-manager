@@ -274,7 +274,7 @@ def render_worktree(worktree: WorktreeView) -> ListItem:
                 classes="worktree-header",
             ),
             Static("Branch: " + worktree.branch, classes="worktree-branch"),
-            classes="worktree-item",
+            classes="worktree-item list-item-container",
         ),
         name=worktree.path,
     )

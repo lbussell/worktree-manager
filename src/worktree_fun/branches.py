@@ -78,7 +78,7 @@ def render_branch(branch: BranchView) -> ListItem:
             Label(name_text, classes="branch-name"),
             Static(branch.last_commit_display, classes="branch-time"),
             Static(branch.upstream_status, classes="branch-upstream"),
-            classes="branch-item",
+            classes="branch-item list-item-container",
         ),
         name=branch.name,
     )
