@@ -64,3 +64,48 @@ WorktreeDetailsModal {
 .worktree-details-field {
     margin-bottom: 1;
 }
+
+CreateWorktreeModal {
+    align: center middle;
+}
+
+#create-worktree-dialog {
+    width: 72;
+    max-width: 90%;
+    height: auto;
+    border: round $accent;
+    background: $surface;
+    padding: 1 2;
+}
+
+.create-worktree-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.create-worktree-label {
+    margin-top: 1;
+}
+
+.create-worktree-help {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+.create-worktree-status {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+#create-worktree-new-branch-fields {
+    margin-top: 1;
+}
+
+#create-worktree-existing-branch-fields {
+    margin-top: 1;
+}
+
+.create-worktree-buttons {
+    height: auto;
+    margin-top: 1;
+}

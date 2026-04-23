@@ -27,15 +27,18 @@ from worktree_fun.github import (
     render_pull_request,
     render_pull_request_message,
 )
+from worktree_fun.vim_list_view import (
+    VimListView,
+)
 from worktree_fun.worktrees import (
+    CreateWorktreeModal,
+    CreateWorktreeRequest,
     WorktreeDetailsModal,
     WorktreeView,
+    create_worktree,
     discover_repository,
     load_worktree_views,
     render_worktree,
-)
-from worktree_fun.vim_list_view import (
-    VimListView,
 )
 
 
@@ -43,6 +46,7 @@ class WorktreeApp(App):
     CSS_PATH = "worktree_app.tcss"
 
     BINDINGS = [
+        ("c", "create_worktree", "Create worktree"),
         ("h", "previous_tab", "Previous tab"),
         ("l", "next_tab", "Next tab"),
         ("q", "quit", "Quit"),
@@ -79,6 +83,52 @@ class WorktreeApp(App):
         if event.pane.id == "worktrees-pane":
             self.query_one("#worktrees", VimListView).focus()
 
+    def action_create_worktree(self) -> None:
+        if self.query_one(TabbedContent).active != "worktrees-pane":
+            return
+
+        if self.focused != self.query_one("#worktrees", VimListView):
+            return
+
+        cwd = os.getcwd()
+        try:
+            repo = discover_repository(cwd)
+        except ValueError as error:
+            self.notify(str(error), title="Unable to open repository", severity="error")
+            return
+
+        self.push_screen(CreateWorktreeModal(repo), self.handle_create_worktree_request)
+
+    def handle_create_worktree_request(
+        self,
+        request: CreateWorktreeRequest | None,
+    ) -> None:
+        if request is None:
+            return
+
+        cwd = os.getcwd()
+        try:
+            repo = discover_repository(cwd)
+            worktree = create_worktree(repo, request)
+        except (ValueError, OSError) as error:
+            self.notify(
+                str(error),
+                title="Unable to create worktree",
+                severity="error",
+                timeout=10,
+            )
+            return
+
+        self.populate_worktrees(highlight_path=worktree.path)
+        self.query_one("#worktrees", VimListView).focus()
+        self.notify(
+            "Created "
+            + worktree.name
+            + " at "
+            + worktree.display_path,
+            title="Worktree created",
+        )
+
     def action_previous_tab(self) -> None:
         self.query_one(Tabs).action_previous_tab()
 
@@ -100,7 +150,7 @@ class WorktreeApp(App):
 
         self.push_screen(WorktreeDetailsModal(worktree))
 
-    def populate_worktrees(self) -> None:
+    def populate_worktrees(self, highlight_path: str | None = None) -> None:
         cwd = os.getcwd()
         try:
             repo = discover_repository(cwd)
@@ -115,8 +165,15 @@ class WorktreeApp(App):
 
         list_view = self.query_one("#worktrees", VimListView)
         list_view.clear()
-        for worktree in worktree_views:
+
+        highlight_index: int | None = None
+        for index, worktree in enumerate(worktree_views):
             list_view.append(render_worktree(worktree))
+            if worktree.path == highlight_path:
+                highlight_index = index
+
+        if highlight_index is not None:
+            list_view.index = highlight_index
 
         self.log(
             "Prepared worktree view",
