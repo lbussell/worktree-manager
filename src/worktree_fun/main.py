@@ -3,12 +3,18 @@ from dataclasses import (
     asdict,
     dataclass,
 )
+from typing import (
+    Literal,
+)
 
 import pygit2
 
 from textual.app import (
     App,
     ComposeResult,
+)
+from textual.lazy import (
+    Lazy,
 )
 from textual.containers import (
     Vertical,
@@ -20,6 +26,8 @@ from textual.widgets import (
     ListItem,
     ListView,
     Static,
+    TabbedContent,
+    TabPane,
 )
 
 
@@ -40,6 +48,30 @@ class WorktreeView:
             return "~" + self.path[len(home) :]
 
         return self.path
+
+
+@dataclass(frozen=True, slots=True)
+class PullRequestListView:
+    number: int
+    title: str
+    branch: str
+    remote: str | None
+    status: Literal["Open", "Merged", "Closed"]
+    is_draft_mode: bool
+
+    @property
+    def branch_display(self) -> str:
+        if self.remote is None:
+            return self.branch
+
+        return f"{self.remote}/{self.branch}"
+
+    @property
+    def status_display(self) -> str:
+        if self.is_draft_mode:
+            return f"{self.status} | Draft"
+
+        return self.status
 
 
 class WorktreeApp(App):
@@ -67,21 +99,49 @@ class WorktreeApp(App):
     .worktree-path {
         color: $text-muted;
     }
+
+    .pull-request-item {
+        height: auto;
+    }
+
+    .pull-request-title {
+        text-style: bold;
+    }
+
+    .pull-request-branch {
+        color: $accent;
+    }
+
+    .pull-request-status {
+        color: $text-muted;
+    }
     """
 
     BINDINGS = [
         ("q", "quit", "Quit"),
     ]
 
+    pull_requests_loaded: bool
+
     def compose(self) -> ComposeResult:
         yield Header()
-        yield ListView(id="worktrees")
+        with TabbedContent(initial="worktrees-pane"):
+            with TabPane("Worktrees", id="worktrees-pane"):
+                yield ListView(id="worktrees")
+            with TabPane("Pull Requests", id="pull-requests-pane"):
+                yield Lazy(ListView(id="pull-requests"))
         yield Footer()
 
     def on_mount(self) -> None:
         self.title = "worktree fun"
+        self.pull_requests_loaded = False
         self.log("Mounting worktree app", cwd=os.getcwd())
-        self.populate()
+        self.populate_worktrees()
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        if event.pane.id == "pull-requests-pane":
+            self.populate_pull_requests()
+            return
 
     def get_repository_branch(self, repo: pygit2.Repository) -> str:
         if repo.head_is_detached:
@@ -133,7 +193,55 @@ class WorktreeApp(App):
             name=worktree.path,
         )
 
-    def populate(self) -> None:
+    def load_pull_request_list_views(self) -> list[PullRequestListView]:
+        return [
+            PullRequestListView(
+                number=142,
+                title="Add pull request list tab",
+                branch="feature/pull-request-tab",
+                remote="origin",
+                status="Open",
+                is_draft_mode=True,
+            ),
+            PullRequestListView(
+                number=137,
+                title="Include current repo in worktree list",
+                branch="dev",
+                remote="origin",
+                status="Merged",
+                is_draft_mode=False,
+            ),
+            PullRequestListView(
+                number=128,
+                title="Experiment with worktree browser",
+                branch="spike/worktree-browser",
+                remote=None,
+                status="Closed",
+                is_draft_mode=False,
+            ),
+        ]
+
+    def render_pull_request(self, pull_request: PullRequestListView) -> ListItem:
+        return ListItem(
+            Vertical(
+                Label(
+                    f"#{pull_request.number} {pull_request.title}",
+                    classes="pull-request-title",
+                ),
+                Static(
+                    "Branch: " + pull_request.branch_display,
+                    classes="pull-request-branch",
+                ),
+                Static(
+                    "Status: " + pull_request.status_display,
+                    classes="pull-request-status",
+                ),
+                classes="pull-request-item",
+            ),
+            name=str(pull_request.number),
+        )
+
+    def populate_worktrees(self) -> None:
         # Find the repo
         cwd = os.getcwd()
         repo_path = pygit2.discover_repository(cwd)
@@ -173,6 +281,24 @@ class WorktreeApp(App):
             worktrees=[asdict(worktree) for worktree in worktree_views],
         )
         list_view.focus()
+
+    def populate_pull_requests(self) -> None:
+        if self.pull_requests_loaded:
+            return
+
+        list_view = self.query_one("#pull-requests", ListView)
+        list_view.clear()
+
+        pull_requests = self.load_pull_request_list_views()
+        for pull_request in pull_requests:
+            list_view.append(self.render_pull_request(pull_request))
+
+        self.log(
+            "Prepared pull request view",
+            count=len(pull_requests),
+            pull_requests=[asdict(pull_request) for pull_request in pull_requests],
+        )
+        self.pull_requests_loaded = True
 
 
 def main() -> None:
