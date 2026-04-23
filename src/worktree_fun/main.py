@@ -44,51 +44,7 @@ from worktree_fun.worktree_view import (
 )
 
 class WorktreeApp(App):
-    CSS = """
-    ListView {
-        border: solid $accent;
-    }
-    ListItem {
-        height: auto;
-        padding: 0 1;
-    }
-
-    .worktree-item {
-        height: auto;
-    }
-
-    .worktree-name {
-        text-style: bold;
-    }
-
-    .worktree-branch {
-        color: $accent;
-    }
-
-    .worktree-path {
-        color: $text-muted;
-    }
-
-    .pull-request-item {
-        height: auto;
-    }
-
-    .pull-request-title {
-        text-style: bold;
-    }
-
-    .pull-request-branch {
-        color: $accent;
-    }
-
-    .pull-request-status {
-        color: $text-muted;
-    }
-
-    .pull-request-message {
-        color: $text-muted;
-    }
-    """
+    CSS_PATH = "worktree_app.tcss"
 
     BINDINGS = [
         ("h", "previous_tab", "Previous tab"),
