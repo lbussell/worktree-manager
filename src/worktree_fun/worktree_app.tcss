@@ -42,3 +42,25 @@ ListItem {
 .pull-request-message {
     color: $text-muted;
 }
+
+WorktreeDetailsModal {
+    align: center middle;
+}
+
+#worktree-details-dialog {
+    width: 60;
+    max-width: 80%;
+    height: auto;
+    border: round $accent;
+    background: $surface;
+    padding: 1 2;
+}
+
+.worktree-details-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.worktree-details-field {
+    margin-bottom: 1;
+}

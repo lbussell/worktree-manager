@@ -16,6 +16,7 @@ from textual.lazy import (
 from textual.widgets import (
     Footer,
     Header,
+    ListView,
     TabbedContent,
     TabPane,
     Tabs,
@@ -27,6 +28,8 @@ from worktree_fun.github import (
     render_pull_request_message,
 )
 from worktree_fun.worktrees import (
+    WorktreeDetailsModal,
+    WorktreeView,
     discover_repository,
     load_worktree_views,
     render_worktree,
@@ -47,6 +50,7 @@ class WorktreeApp(App):
 
     pull_requests_loaded: bool
     pull_requests_loading: bool
+    worktrees_by_path: dict[str, WorktreeView]
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -61,6 +65,7 @@ class WorktreeApp(App):
         self.title = "worktree fun"
         self.pull_requests_loaded = False
         self.pull_requests_loading = False
+        self.worktrees_by_path = {}
         self.log("Mounting worktree app", cwd=os.getcwd())
         self.populate_worktrees()
         self.query_one("#worktrees", VimListView).focus()
@@ -80,6 +85,21 @@ class WorktreeApp(App):
     def action_next_tab(self) -> None:
         self.query_one(Tabs).action_next_tab()
 
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if event.list_view.id != "worktrees":
+            return
+
+        worktree_path = event.item.name
+        if worktree_path is None:
+            return
+
+        worktree = self.worktrees_by_path.get(worktree_path)
+        if worktree is None:
+            self.log("Selected worktree not found", path=worktree_path)
+            return
+
+        self.push_screen(WorktreeDetailsModal(worktree))
+
     def populate_worktrees(self) -> None:
         cwd = os.getcwd()
         try:
@@ -91,6 +111,7 @@ class WorktreeApp(App):
 
         self.log("Repository discovered", workdir=repo.workdir, git_dir=repo.path)
         worktree_views = load_worktree_views(repo)
+        self.worktrees_by_path = {worktree.path: worktree for worktree in worktree_views}
 
         list_view = self.query_one("#worktrees", VimListView)
         list_view.clear()
