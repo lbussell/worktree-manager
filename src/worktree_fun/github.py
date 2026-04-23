@@ -139,7 +139,17 @@ def load_pull_request_list_views() -> list[PullRequestListView]:
     ]
 
 
+def get_pull_request_status_class(status: str) -> str:
+    status_classes: dict[str, str] = {
+        "Open": "pull-request-status-open",
+        "Closed": "pull-request-status-closed",
+        "Merged": "pull-request-status-merged",
+    }
+    return status_classes.get(status, "")
+
+
 def render_pull_request(pull_request: PullRequestListView) -> ListItem:
+    status_class = get_pull_request_status_class(pull_request.status)
     return ListItem(
         Vertical(
             Label(
@@ -152,7 +162,7 @@ def render_pull_request(pull_request: PullRequestListView) -> ListItem:
             ),
             Static(
                 "Status: " + pull_request.status_display,
-                classes="pull-request-status",
+                classes=f"pull-request-status {status_class}",
             ),
             classes="pull-request-item list-item-container",
         ),

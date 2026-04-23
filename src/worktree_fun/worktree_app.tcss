@@ -53,8 +53,16 @@ ListItem {
     color: $accent;
 }
 
-.pull-request-status {
-    color: $text-muted;
+.pull-request-status-open {
+    color: green;
+}
+
+.pull-request-status-closed {
+    color: red;
+}
+
+.pull-request-status-merged {
+    color: purple;
 }
 
 .pull-request-message {
