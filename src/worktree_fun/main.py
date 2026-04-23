@@ -71,6 +71,14 @@ class WorktreeApp(App):
         self.log("Mounting worktree app", cwd=os.getcwd())
         self.populate()
 
+    def get_repository_branch(self, repo: pygit2.Repository) -> str:
+        if repo.head_is_detached:
+            return "(detached HEAD)"
+        if repo.head_is_unborn:
+            return "(unborn branch)"
+
+        return repo.head.shorthand
+
     def get_worktree_branch(self, worktree) -> str:
         repo_path = pygit2.discover_repository(worktree.path)
         if repo_path is None:
@@ -81,18 +89,25 @@ class WorktreeApp(App):
         except pygit2.GitError:
             return "(unknown branch)"
 
-        if worktree_repo.head_is_detached:
-            return "(detached HEAD)"
-        if worktree_repo.head_is_unborn:
-            return "(unborn branch)"
+        return self.get_repository_branch(worktree_repo)
 
-        return worktree_repo.head.shorthand
+    def get_worktree_name(self, path: str) -> str:
+        normalized_path = os.path.normpath(path)
+        return os.path.basename(normalized_path) or normalized_path
+
+    def build_current_worktree_view(self, repo: pygit2.Repository) -> WorktreeView:
+        path = os.path.normpath(repo.workdir or repo.path)
+        return WorktreeView(
+            name=self.get_worktree_name(path),
+            branch=self.get_repository_branch(repo),
+            path=path,
+        )
 
     def build_worktree_view(self, worktree) -> WorktreeView:
         return WorktreeView(
             name=worktree.name,
             branch=self.get_worktree_branch(worktree),
-            path=worktree.path,
+            path=os.path.normpath(worktree.path),
         )
 
     def render_worktree(self, worktree: WorktreeView) -> ListItem:
@@ -127,7 +142,16 @@ class WorktreeApp(App):
         list_view.clear()
 
         # Populate the list
-        worktree_views = [self.build_worktree_view(worktree) for worktree in worktree_infos]
+        worktree_views = [self.build_current_worktree_view(repo)]
+        seen_paths = {worktree_views[0].path}
+        for worktree in worktree_infos:
+            worktree_view = self.build_worktree_view(worktree)
+            if worktree_view.path in seen_paths:
+                continue
+
+            worktree_views.append(worktree_view)
+            seen_paths.add(worktree_view.path)
+
         for worktree in worktree_views:
             list_view.append(self.render_worktree(worktree))
 
